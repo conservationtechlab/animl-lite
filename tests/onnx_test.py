@@ -42,21 +42,15 @@ def onnx_gpu_test():
 
     allframes = animl.load_data(workingdir.imageframes)
 
-    model_cpu = animl.load_detector(cfg['detector_file'], model_type="onnx", device='cpu')
+    model_cpu = animl.load_detector(cfg['detector_file'])
 
-    results = animl.detect(model_cpu, allframes, resize_width=960, resize_height=960, batch_size=4, device='cpu')
+    results = animl.detect_test(model_cpu, allframes, resize_width=960, resize_height=960)
     detections = animl.parse_detections(results, manifest=allframes)
 
     print(detections)
 
-    model_gpu = animl.load_detector(cfg['detector_file'], model_type="onnx", device='cuda:0')
-    results_gpu = animl.detect(model_gpu, allframes, resize_width=960, resize_height=960, batch_size=4, device='cuda:0')
-    detections_gpu = animl.parse_detections(results_gpu, manifest=allframes)
-
-    print(detections_gpu)
-
     print(f"ONNX GPU Test completed in {time.time() - start_time:.2f} seconds")
 
 
-onnx_test()
-# onnx_gpu_test()
+#onnx_test()
+onnx_gpu_test()

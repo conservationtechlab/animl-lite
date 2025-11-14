@@ -13,14 +13,14 @@ from tqdm import tqdm
 import onnxruntime
 
 from animl import generator, file_management
-from animl.utils.general import get_device, softmax, tensor_to_onnx, NUM_THREADS
+from animl.utils.general import get_device, softmax
 
 
 SDZWA_CLASSIFIER_SIZE = 299
 
+
 def load_classifier(model_path: str,
-                    classes: Union[int, str, Path, pd.DataFrame],
-                    device: Optional[str] = None):
+                    classes: Union[int, str, Path, pd.DataFrame] = None):
     '''
     Creates a model instance and loads the latest model state weights.
 
@@ -36,6 +36,12 @@ def load_classifier(model_path: str,
     '''
     class_list = None
     model_path = Path(model_path)
+    # check to make sure GPU is available if chosen
+    providers = get_device()
+
+    print(f'Loading model at {model_path}')
+    model = onnxruntime.InferenceSession(model_path, providers=providers)
+    model.framework = "onnx"
 
     # get number of classes
     if isinstance(classes, str) or isinstance(classes, Path):
@@ -44,17 +50,6 @@ def load_classifier(model_path: str,
         class_list = classes
     else:
         class_list = None
-
-    # check to make sure GPU is available if chosen
-    if device is None:
-        device = get_device()
-
-    print(f'Loading model at {model_path}')
-
-    providers = ["CPUExecutionProvider"] if device == "cpu" else ["CUDAExecutionProvider", "CPUExecutionProvider"]
-    model = onnxruntime.InferenceSession(model_path,
-                                         providers=providers)
-    model.framework = "onnx"
     # try to load class dict from metadata
     props = model.get_modelmeta().custom_metadata_map
     if "class_dict" in props:
@@ -89,9 +84,6 @@ def classify(model,
              file_col: str = 'filepath',
              crop: bool = True,
              normalize: bool = True,
-             batch_size: int = 1,
-             num_workers: int = NUM_THREADS,
-             device: Optional[str] = None,
              out_file: Optional[str] = None):
     """
     Predict species using classifier model.
@@ -115,8 +107,7 @@ def classify(model,
     if file_management.check_file(out_file, output_type="Classification results"):
         return file_management.load_data(out_file).to_numpy()
 
-    if device is None:
-        device = get_device()
+    providers = get_device(quiet=True)
 
     # initialize lists
     raw_output = []
@@ -132,28 +123,27 @@ def classify(model,
 
         dataset = generator.manifest_dataloader(detections, file_col=file_col, crop=crop,
                                                 resize_width=resize_width, resize_height=resize_height,
-                                                normalize=normalize, batch_size=batch_size, num_workers=num_workers)
+                                                normalize=normalize)
     # Single File
     elif isinstance(detections, str):
         detections = pd.DataFrame({file_col: detections, 'frame': 0}, index=[0])
         dataset = generator.manifest_dataloader(detections, file_col=file_col, crop=False,
                                                 resize_width=resize_width, resize_height=resize_height,
-                                                normalize=normalize, batch_size=1, num_workers=1)
+                                                normalize=normalize)
     # List of Files
     elif isinstance(detections, list):
         detections = pd.DataFrame({file_col: detections, 'frame': 0}, index=range(len(detections)))
         dataset = generator.manifest_dataloader(detections, file_col=file_col, crop=False,
                                                 resize_width=resize_width, resize_height=resize_height,
-                                                normalize=normalize, batch_size=batch_size, num_workers=1)
+                                                normalize=normalize)
     else:
         raise AssertionError("Input must be a data frame of crops, single file path or vector of file paths.")
 
     # Predict
     start_time = time()
-    for _, batch in tqdm(enumerate(dataset), total=len(dataset)):
-        data = batch[0]
-        data = tensor_to_onnx(data)
-        output = model.run(None, {model.get_inputs()[0].name: data})[0]
+    for _, batch in tqdm(enumerate(dataset), total=len(detections)):
+        image = batch[0]
+        output = model.run(None, {model.get_inputs()[0].name: image})[0]
         raw_output.extend(softmax(output))
 
     raw_output = np.vstack(raw_output)

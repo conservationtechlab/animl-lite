@@ -33,7 +33,7 @@ def main_test():
     workingdir = Path.cwd() / 'examples' / 'Southwest' / 'Animl-Directory'
     shutil.rmtree(workingdir, ignore_errors=True)
 
-    megadetector = Path.cwd() / 'models/md_v5a.0.0.onnx'
+    megadetector = Path.cwd() / 'models/md_v1000.0.0-sorrel.onnx'
     classifier_file = Path.cwd() / 'models/sdzwa_southwest_v3.onnx'
 
     animl.from_paths(image_dir, megadetector, classifier_file,

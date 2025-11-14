@@ -6,20 +6,18 @@ Automated Pipeline Functions
 
 import os
 import yaml
-import torch
 import pandas as pd
 
 from animl import (classification, detection, export, file_management,
                    video_processing, split)
 from animl.utils import visualization
-from animl.utils.general import get_device, NUM_THREADS
+from animl.utils.general import get_device
 
 
 def from_paths(image_dir: str,
                detector_file: str,
                classifier_file: str,
                class_label: str = "class",
-               batch_size: int = 4,
                sort: bool = True,
                visualize: bool = False,
                sequence: bool = False) -> pd.DataFrame:
@@ -49,10 +47,11 @@ def from_paths(image_dir: str,
                                                 exif=True)
     # files["station"] = files["filepath"].apply(lambda x: x.split(os.sep)[-2])
     print(f"Found {len(files)} files.")
-
-    # split out videos
+    
+    # Obtain frames from videos
     all_frames = video_processing.extract_frames(files, frames=5, out_file=working_dir.imageframes)
 
+    # Run detector
     print("Running images and video frames through detector...")
     if (file_management.check_file(working_dir.detections, output_type="Detections")):
         detections = file_management.load_data(working_dir.detections)
@@ -75,7 +74,8 @@ def from_paths(image_dir: str,
     # Use the classifier model to predict the species of animal detections
     print("Predicting species of animal detections...")
     classifier, class_list = classification.load_classifier(classifier_file)
-    predictions_raw = classification.classify(classifier, animals,
+    predictions_raw = classification.classify(classifier,
+                                              animals,
                                               resize_height=classification.SDZWA_CLASSIFIER_SIZE,
                                               resize_width=classification.SDZWA_CLASSIFIER_SIZE,
                                               out_file=working_dir.predictions)
@@ -172,9 +172,6 @@ def from_config(config: str):
                                               resize_height=cfg.get('classifier_resize_height', classification.SDZWA_CLASSIFIER_SIZE),
                                               resize_width=cfg.get('classifier_resize_width', classification.SDZWA_CLASSIFIER_SIZE),
                                               file_col=cfg.get('file_col_classification', 'filepath'),
-                                              batch_size=cfg.get('batch_size', 4),
-                                              num_workers=cfg.get('num_workers', NUM_THREADS),
-                                              device=device,
                                               out_file=working_dir.predictions)
 
     # Convert predictions to labels

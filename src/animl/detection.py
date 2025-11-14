@@ -15,7 +15,7 @@ from tqdm import tqdm
 import onnxruntime as ort
 
 from animl import file_management
-from animl.generator import manifest_dataloader, image_to_tensor
+from animl.generator import manifest_dataloader
 from animl.utils.general import normalize_boxes, xyxy2xywh, scale_letterbox, get_device
 
 MEGADETECTORv5_SIZE = 1280
@@ -75,8 +75,12 @@ def detect(detector,
     # Single image filepath
     if isinstance(image_file_names, str):
         # convert img path to tensor
-        batch_from_dataloader = image_to_tensor(image_file_names, letterbox=letterbox,
-                                                resize_width=resize_width, resize_height=resize_height)
+        batch_from_dataloader = manifest_dataloader(pd.DataFrame([[image_file_names, 0]], columns=['filepath', 'frame']),
+                                                    crop=False,
+                                                    normalize=True,
+                                                    letterbox=letterbox,
+                                                    resize_width=resize_width,
+                                                    resize_height=resize_height)
         image_tensors = batch_from_dataloader[0]  # Tensor of images for the current batch
         current_image_paths = batch_from_dataloader[1]  # List of image names for the current batch
         image_sizes = batch_from_dataloader[2]  # List of original image sizes for the current batch
@@ -102,19 +106,6 @@ def detect(detector,
         # create a list of image paths
         manifest = image_file_names[[file_col, 'frame']]
 
-    # single row pd.Series, select file_col
-    elif isinstance(image_file_names, pd.Series):
-        if file_col not in image_file_names.index:
-            raise ValueError(f"file_col {file_col} not found in Series index")
-        if 'frame' not in image_file_names.index:
-            print("Warning: 'frame' column not found in Series index. Defaulting to 0 assuming images.")
-            image_file_names['frame'] = 0
-        image_file_names = [image_file_names[file_col], image_file_names['frame']]
-        # create a data frame from image_file_names
-        manifest = pd.DataFrame(image_file_names, columns=['filepath', 'frame'])
-    # column from pd.DataFrame, expected input
-    else:
-        raise ValueError('image_file_names is not a recognized object')
 
     # load checkpoint
     if file_management.check_file(checkpoint_path, output_type="Megadetector raw output"):
@@ -132,11 +123,11 @@ def detect(detector,
 
     # create dataloader
     dataloader = manifest_dataloader(manifest,
-                                     crop=False,
-                                     normalize=True,
-                                     letterbox=letterbox,
-                                     resize_width=resize_width,
-                                     resize_height=resize_height)
+                                      crop=False,
+                                      normalize=True,
+                                      letterbox=letterbox,
+                                      resize_width=resize_width,
+                                      resize_height=resize_height)
 
     start_time = time.time()
     for _, batch in tqdm(enumerate(dataloader), total=len(manifest)):
@@ -145,15 +136,15 @@ def detect(detector,
         image_tensors = batch[0]  # Tensor of images for the current batch
         current_image_paths = batch[1]  # List of image names for the current batch
         current_frames = batch[2]  # List of frame numbers for the current batch
-        image_sizes = batch[3]  # List of original image sizes for the current batch
+        current_sizes = batch[3]  # List of original image sizes for the current batch
 
         # ONNX Runtime inference
         input_name = detector.get_inputs()[0].name
         outputs = detector.run(None, {input_name: image_tensors})[0]
-    
+        outputs = convert_onnx_detections(outputs, confidence_threshold, 
+                                          image_tensors, current_image_paths, current_frames, current_sizes, letterbox)
         # Process outputs to match expected format
-        results.extend(convert_onnx_detections(outputs, confidence_threshold, image_tensors, current_image_paths, current_frames,
-                                                image_sizes, letterbox))
+        results.extend(outputs)
 
         # Write a checkpoint if necessary
         if checkpoint_frequency != -1 and count % checkpoint_frequency == 0:
@@ -258,8 +249,7 @@ def parse_detections(results: list,
 
     lst = []
 
-    for frame in tqdm(results):
-
+    for frame in results:
         # pass if already analyzed
         if frame['filepath'] in already_processed:
             continue

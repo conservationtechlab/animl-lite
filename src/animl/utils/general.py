@@ -3,26 +3,8 @@ General utils
 
 """
 import cv2
-import os
-import warnings
 import numpy as np
-import pandas as pd
-
-import torch
-
 import onnxruntime as ort
-
-
-# Suppress PyTorch warnings
-warnings.filterwarnings('ignore', message='User provided device_type of \'cuda\', but CUDA is not available. Disabling')
-
-# Settings
-NUM_THREADS = min(8, max(1, os.cpu_count() - 1))  # number of multiprocessing threads
-np.set_printoptions(linewidth=320, formatter={'float_kind': '{:11.5g}'.format})  # format short g, %precision=5
-pd.options.display.max_columns = 10
-cv2.setNumThreads(0)  # prevent OpenCV from multithreading (incompatible with PyTorch DataLoader)
-os.environ['NUMEXPR_MAX_THREADS'] = str(NUM_THREADS)  # NumExpr max threads
-os.environ['OMP_NUM_THREADS'] = str(NUM_THREADS)  # OpenMP max threads (PyTorch and SciPy)
 
 
 def softmax(x):
@@ -46,7 +28,7 @@ def tensor_to_onnx(tensor, channel_last=False):
 
 def get_device(quiet=False):
     """
-    Get Torch device if available
+    Get gpu if available
     """
     if "CUDAExecutionProvider" in ort.get_available_providers():
         if not quiet:
@@ -63,7 +45,7 @@ def get_device(quiet=False):
 # ==============================================================================
 def xyxyc2xywh(x):
     # Convert nx4 boxes from [x1, y1, x2, y2] to [x, y, w, h] where xy1=top-left, xy2=bottom-right
-    y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
+    y = np.copy(x)
     y[:, 0] = (x[:, 0] + x[:, 2]) / 2  # x center
     y[:, 1] = (x[:, 1] + x[:, 3]) / 2  # y center
     y[:, 2] = x[:, 2] - x[:, 0]  # width
@@ -73,7 +55,7 @@ def xyxyc2xywh(x):
 
 def xywhc2xyxy(x):
     # Convert nx4 boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
-    y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
+    y = np.copy(x)
     y[:, 0] = x[:, 0] - x[:, 2] / 2  # top left x
     y[:, 1] = x[:, 1] - x[:, 3] / 2  # top left y
     y[:, 2] = x[:, 0] + x[:, 2] / 2  # bottom right x
@@ -83,7 +65,7 @@ def xywhc2xyxy(x):
 
 def xywhn2xyxy(x, w=640, h=640, padw=0, padh=0):
     # Convert nx4 boxes from [x, y, w, h] normalized to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
-    y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
+    y = np.copy(x)
     y[:, 0] = w * (x[:, 0] - x[:, 2] / 2) + padw  # top left x
     y[:, 1] = h * (x[:, 1] - x[:, 3] / 2) + padh  # top left y
     y[:, 2] = w * (x[:, 0] + x[:, 2] / 2) + padw  # bottom right x
@@ -95,7 +77,7 @@ def xyxyc2xywhn(x, w=640, h=640, clip=False, eps=0.0):
     # Convert nx4 boxes from [x1, y1, x2, y2] to [x, y, w, h] normalized where xy1=top-left, xy2=bottom-right
     if clip:
         clip_coords(x, (h - eps, w - eps))  # warning: inplace clip
-    y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
+    y = np.copy(x)
     y[:, 0] = ((x[:, 0] + x[:, 2]) / 2) / w  # x center
     y[:, 1] = ((x[:, 1] + x[:, 3]) / 2) / h  # y center
     y[:, 2] = (x[:, 2] - x[:, 0]) / w  # width
@@ -105,7 +87,7 @@ def xyxyc2xywhn(x, w=640, h=640, clip=False, eps=0.0):
 
 def xyn2xy(x, w=640, h=640, padw=0, padh=0):
     # Convert normalized segments into pixel segments, shape (n,2)
-    y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
+    y = np.copy(x)
     y[:, 0] = w * x[:, 0] + padw  # top left x
     y[:, 1] = h * x[:, 1] + padh  # top left y
     return y
@@ -121,7 +103,7 @@ def xywh2xyxy(bbox):
     Returns:
         list: Normalized bounding box coordinates in the format [x_min, y_min, width, height].
     """
-    y = bbox.clone() if isinstance(bbox, torch.Tensor) else np.copy(bbox)
+    y = np.copy(bbox)
     y[2] = y[0] + y[2]  # bottom right x
     y[3] = y[1] + y[3]  # bottom right y
     return y
@@ -138,7 +120,7 @@ def xyxy2xywh(bbox):
     Returns:
         list: Normalized bounding box coordinates in the format [x_min, y_min, width, height].
     """
-    y = bbox.clone() if isinstance(bbox, torch.Tensor) else np.copy(bbox)
+    y = np.copy(bbox)
     y[2] = y[2] - y[0]  # width
     y[3] = y[3] - y[1]  # height
     return y
@@ -168,14 +150,8 @@ def convert_minxywh_to_absxyxy(bbox, width, height):
 
 def clip_coords(boxes, shape):
     # Clip bounding xyxy bounding boxes to image shape (height, width)
-    if isinstance(boxes, torch.Tensor):  # faster individually
-        boxes[:, 0].clamp_(0, shape[1])  # x1
-        boxes[:, 1].clamp_(0, shape[0])  # y1
-        boxes[:, 2].clamp_(0, shape[1])  # x2
-        boxes[:, 3].clamp_(0, shape[0])  # y2
-    else:  # np.array (faster grouped)
-        boxes[:, [0, 2]] = boxes[:, [0, 2]].clip(0, shape[1])  # x1, x2
-        boxes[:, [1, 3]] = boxes[:, [1, 3]].clip(0, shape[0])  # y1, y2
+    boxes[:, [0, 2]] = boxes[:, [0, 2]].clip(0, shape[1])  # x1, x2
+    boxes[:, [1, 3]] = boxes[:, [1, 3]].clip(0, shape[0])  # y1, y2
 
 
 def normalize_boxes(bbox, image_sizes):
@@ -190,7 +166,7 @@ def normalize_boxes(bbox, image_sizes):
         list: Normalized bounding box coordinates.
     """
     img_height, img_width  = image_sizes
-    y = bbox.clone() if isinstance(bbox, torch.Tensor) else np.copy(bbox)   
+    y = np.copy(bbox)   
     y[[0,2]] = np.clip(y[[0,2]] / img_width, 0, 1)
     y[[1,3]] = np.clip(y[[1,3]] / img_height, 0, 1)
     return y
@@ -245,7 +221,7 @@ def scale_letterbox(bbox, resized_shape, original_shape):
     are in normalized [x_corner, y_corner, width, height] format.
 
     Args:
-        bbox (np.ndarray or torch.Tensor): A numpy array or tensor of bounding
+        bbox (np.ndarray): A numpy array or tensor of bounding
                                              boxes, shape (n, 4), in
                                              (x_corner, y_corner, width, height) format.
                                              Coordinates are in pixels relative
@@ -259,16 +235,6 @@ def scale_letterbox(bbox, resized_shape, original_shape):
                     coordinates in normalized (x_corner, y_corner, width, height)
                     format.
     """
-    # Convert to numpy array if it's a tensor
-    if isinstance(bbox, torch.Tensor):
-        bbox = bbox.cpu().numpy()
-    
-    if isinstance(resized_shape, torch.Tensor):
-        resized_shape = resized_shape.cpu().numpy()
-
-    if isinstance(original_shape, torch.Tensor):
-        original_shape = original_shape.cpu().numpy()
-
     # Convert input xywh (top-left corner) to xyxy
     xyxy_coords = xywh2xyxy(bbox)
 
