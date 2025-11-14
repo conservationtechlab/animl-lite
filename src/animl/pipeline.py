@@ -3,7 +3,6 @@ Automated Pipeline Functions
 
 @ Kyra Swanson 2023
 """
-
 import os
 import yaml
 import pandas as pd
@@ -11,7 +10,6 @@ import pandas as pd
 from animl import (classification, detection, export, file_management,
                    video_processing, split)
 from animl.utils import visualization
-from animl.utils.general import get_device
 
 
 def from_paths(image_dir: str,
@@ -47,7 +45,7 @@ def from_paths(image_dir: str,
                                                 exif=True)
     # files["station"] = files["filepath"].apply(lambda x: x.split(os.sep)[-2])
     print(f"Found {len(files)} files.")
-    
+
     # Obtain frames from videos
     all_frames = video_processing.extract_frames(files, frames=5, out_file=working_dir.imageframes)
 

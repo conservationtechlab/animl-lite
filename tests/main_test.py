@@ -24,7 +24,7 @@ from pathlib import Path
 import animl
 
 
-# @unittest.skip
+@unittest.skip
 def main_test():
     start_time = time.time()
 

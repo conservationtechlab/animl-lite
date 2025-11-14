@@ -38,10 +38,7 @@ def load_miew(file_path: str,
 
 def extract_miew_embeddings(miew_model,
                             manifest: pd.DataFrame,
-                            file_col: str = "filepath",
-                            batch_size: int = 1,
-                            num_workers: int = 1,
-                            device: Optional[str] = None):
+                            file_col: str = "filepath"):
     """
     Wrapper for MiewID embedding extraction
 
@@ -49,28 +46,23 @@ def extract_miew_embeddings(miew_model,
         miew_model: MiewID model object
         manifest (pd.DataFrame): dataframe with columns 'filepath', 'emb_id'
         file_col (str): column name for file paths in manifest
-        batch_size (int): batch size for dataloader
-        num_workers (int): number of workers for dataloader
-        device (str): device to run model on
 
     Returns:
         output (np.ndarray): array of extracted embeddings
     """
-    if device is None:
-        device = get_device()
-
     if not {file_col}.issubset(manifest.columns):
         raise ValueError(f"DataFrame must contain '{file_col}' column.")
 
     output = []
     if isinstance(manifest, pd.DataFrame):
 
-        dataloader = manifest_dataloader(manifest, batch_size=batch_size, num_workers=num_workers,
-                                         file_col=file_col, crop=True, 
+        dataloader = manifest_dataloader(manifest,
+                                         file_col=file_col,
+                                         crop=True,
                                          normalize={"mean": [0.485, 0.456, 0.406], "std": [0.229, 0.224, 0.225]},
                                          resize_width=MIEWID_SIZE,
                                          resize_height=MIEWID_SIZE,)
-        for _, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
+        for _, batch in tqdm(enumerate(dataloader), total=len(manifest)):
             img = batch[0]
             inp = miew_model.get_inputs()[0]
             outputs = miew_model.run(None, {inp.name: img})[0]

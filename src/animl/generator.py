@@ -15,44 +15,42 @@ import pandas as pd
 from pathlib import Path
 from PIL import Image, ImageFile, ImageOps
 
-
 from animl.file_management import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
-
 def Letterbox(resize_height: int,
               resize_width: int,
               image: Image.Image) -> Image.Image:
-        # PIL image size: (width, height)
-        width, height = image.size
-        target_w, target_h = resize_width, resize_height
+    # PIL image size: (width, height)
+    width, height = image.size
+    target_w, target_h = resize_width, resize_height
 
-        # If aspect ratios are already the same (rounded to 2 decimals), just resize
-        if round((width / height), 2) == round((target_w / target_h), 2):
-            return image.resize((target_w, target_h), Image.BILINEAR)
+    # If aspect ratios are already the same (rounded to 2 decimals), just resize
+    if round((width / height), 2) == round((target_w / target_h), 2):
+        return image.resize((target_w, target_h), Image.BILINEAR)
 
-        # Compute required padding to achieve target aspect ratio, do center pad
-        target_ar = target_w / target_h
-        src_ar = width / height
+    # Compute required padding to achieve target aspect ratio, do center pad
+    target_ar = target_w / target_h
+    src_ar = width / height
 
-        if src_ar < target_ar:
-            # source narrower -> pad left/right
-            new_width = int(target_ar * height)
-            pad_total = max(0, new_width - width)
-            pad_left = pad_total // 2
-            pad_right = pad_total - pad_left
-            padded = ImageOps.expand(image, border=(pad_left, 0, pad_right, 0), fill=0)
-        else:
-            # source wider -> pad top/bottom
-            new_height = int(width / target_ar)
-            pad_total = max(0, new_height - height)
-            pad_top = pad_total // 2
-            pad_bottom = pad_total - pad_top
-            padded = ImageOps.expand(image, border=(0, pad_top, 0, pad_bottom), fill=0)
+    if src_ar < target_ar:
+        # source narrower -> pad left/right
+        new_width = int(target_ar * height)
+        pad_total = max(0, new_width - width)
+        pad_left = pad_total // 2
+        pad_right = pad_total - pad_left
+        padded = ImageOps.expand(image, border=(pad_left, 0, pad_right, 0), fill=0)
+    else:
+        # source wider -> pad top/bottom
+        new_height = int(width / target_ar)
+        pad_total = max(0, new_height - height)
+        pad_top = pad_total // 2
+        pad_bottom = pad_total - pad_top
+        padded = ImageOps.expand(image, border=(0, pad_top, 0, pad_bottom), fill=0)
 
-        return padded.resize((target_w, target_h), Image.BILINEAR)
+    return padded.resize((target_w, target_h), Image.BILINEAR)
 
 
 def Normalize(img: np.ndarray,
@@ -205,7 +203,7 @@ class ManifestGenerator:
         elif self.normalize is False:
             # unnormalize back to [0,255] if needed
             img_arr = img_arr * 255.0
-            
+
         # return: img as numpy array (C,H,W), filepath str, frame int, shape np.array(height,width)
         return img_arr, str(filepath), int(frame), np.array((height, width), dtype=np.int32)
 
@@ -257,10 +255,11 @@ def manifest_dataloader(manifest: pd.DataFrame,
                                          file_col=file_col,
                                          crop=crop,
                                          crop_coord=crop_coord,
-                                         normalize=normalize, 
+                                         normalize=normalize,
                                          letterbox=letterbox,
                                          resize_width=resize_width,
                                          resize_height=resize_height)
+
     def batch_generator():
         for i in range(len(dataset_instance)):
             item = dataset_instance[i]

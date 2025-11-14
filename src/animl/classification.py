@@ -107,8 +107,6 @@ def classify(model,
     if file_management.check_file(out_file, output_type="Classification results"):
         return file_management.load_data(out_file).to_numpy()
 
-    providers = get_device(quiet=True)
-
     # initialize lists
     raw_output = []
 

@@ -35,7 +35,7 @@ def load_detector(model_path: str):
     """
     if not Path(model_path).is_file():
         raise FileNotFoundError(f"Model file not found at {model_path}")
-    
+
     providers = get_device()
     model = ort.InferenceSession(model_path, providers=providers)
     model.model_type = "onnx"
@@ -70,8 +70,6 @@ def detect(detector,
     Returns:
         list: list of dicts, each dict represents detections on one image
     """
-    providers = get_device(quiet=True)
-
     # Single image filepath
     if isinstance(image_file_names, str):
         # convert img path to tensor
@@ -86,13 +84,8 @@ def detect(detector,
         image_sizes = batch_from_dataloader[2]  # List of original image sizes for the current batch
 
         input_name = detector.get_inputs()[0].name
-
-        if 'CUDAExecutionProvider' not in providers:
-            outputs = detector.run(None, {input_name: image_tensors.cpu().numpy()})[0]
-        else:
-            outputs = detector.run(None, {input_name: image_tensors.numpy()})[0]
-
-        results = convert_onnx_detections(outputs, image_tensors, current_image_paths, image_sizes, letterbox, detector.model_type)
+        outputs = detector.run(None, {input_name: image_tensors.cpu().numpy()})[0]
+        results = convert_onnx_detections(outputs, image_tensors, current_image_paths, image_sizes, letterbox)
         return results
 
     # Full manifest, select file_col
@@ -105,7 +98,6 @@ def detect(detector,
             image_file_names['frame'] = 0
         # create a list of image paths
         manifest = image_file_names[[file_col, 'frame']]
-
 
     # load checkpoint
     if file_management.check_file(checkpoint_path, output_type="Megadetector raw output"):
@@ -141,7 +133,7 @@ def detect(detector,
         # ONNX Runtime inference
         input_name = detector.get_inputs()[0].name
         outputs = detector.run(None, {input_name: image_tensors})[0]
-        outputs = convert_onnx_detections(outputs, confidence_threshold, 
+        outputs = convert_onnx_detections(outputs, confidence_threshold,
                                           image_tensors, current_image_paths, current_frames, current_sizes, letterbox)
         # Process outputs to match expected format
         results.extend(outputs)
@@ -210,7 +202,6 @@ def convert_onnx_detections(predictions: list,
             results.append(data)
 
     return results
-
 
 
 def parse_detections(results: list,
