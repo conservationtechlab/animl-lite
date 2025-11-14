@@ -10,6 +10,8 @@ import pandas as pd
 
 import torch
 
+import onnxruntime as ort
+
 
 # Suppress PyTorch warnings
 warnings.filterwarnings('ignore', message='User provided device_type of \'cuda\', but CUDA is not available. Disabling')
@@ -42,14 +44,18 @@ def tensor_to_onnx(tensor, channel_last=False):
     return tensor
 
 
-# TODO change to onnxruntime
-def get_device():
+def get_device(quiet=False):
     """
     Get Torch device if available
     """
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f'Device is set to {device}.')
-    return device
+    if "CUDAExecutionProvider" in ort.get_available_providers():
+        if not quiet:
+            print("CUDA is available. Using GPU for inference.")
+        return ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    else:
+        if not quiet:
+            print("CUDA is not available (onnxruntime CPU-only).")
+        return ["CPUExecutionProvider"]
 
  
 # ==============================================================================

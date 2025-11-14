@@ -15,13 +15,13 @@ from tqdm import tqdm
 import onnxruntime as ort
 
 from animl import file_management
-from animl.model_architecture import MEGADETECTORv5_SIZE
 from animl.generator import manifest_dataloader, image_to_tensor
-from animl.utils.general import normalize_boxes, xyxy2xywh, scale_letterbox, non_max_suppression, get_device
+from animl.utils.general import normalize_boxes, xyxy2xywh, scale_letterbox, get_device
+
+MEGADETECTORv5_SIZE = 1280
 
 
-def load_detector(model_path: str,
-                  device: Optional[str] = None):
+def load_detector(model_path: str):
     """
     Load Detector model from filepath.
 
@@ -35,12 +35,8 @@ def load_detector(model_path: str,
     """
     if not Path(model_path).is_file():
         raise FileNotFoundError(f"Model file not found at {model_path}")
-
-    if device is None:
-        device = get_device()
-
-    # ONNX model
-    providers = ["CPUExecutionProvider"] if device == "cpu" else ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    
+    providers = get_device()
     model = ort.InferenceSession(model_path, providers=providers)
     model.model_type = "onnx"
     return model
@@ -53,9 +49,6 @@ def detect(detector,
            letterbox: bool = True,
            confidence_threshold: float = 0.1,
            file_col: str = 'filepath',
-           batch_size: int = 1,
-           num_workers: int = 1,
-           device: Optional[str] = None,
            checkpoint_path: Optional[str] = None,
            checkpoint_frequency: int = -1) -> list[dict]:
     """
@@ -70,8 +63,6 @@ def detect(detector,
         letterbox (bool): if True, resize and pad image to keep aspect ratio, else resize without padding
         confidence_threshold (float): only detections above this threshold are returned
         file_col (str): column name containing file paths
-        batch_size (int): size of each batch
-        num_workers (int): number of processes to handle the data
         device (str): specify to run on cpu or gpu
         checkpoint_path (str): path to checkpoint file
         checkpoint_frequency (int): write results to checkpoint file every N images
@@ -79,12 +70,7 @@ def detect(detector,
     Returns:
         list: list of dicts, each dict represents detections on one image
     """
-    if checkpoint_frequency != -1:
-        checkpoint_frequency = max(1, round(checkpoint_frequency/batch_size, None))
-
-    # check to make sure GPU is available if chosen
-    if device is None:
-        device = get_device()
+    providers = get_device(quiet=True)
 
     # Single image filepath
     if isinstance(image_file_names, str):
@@ -96,7 +82,8 @@ def detect(detector,
         image_sizes = batch_from_dataloader[2]  # List of original image sizes for the current batch
 
         input_name = detector.get_inputs()[0].name
-        if device == "cpu":
+
+        if 'CUDAExecutionProvider' not in providers:
             outputs = detector.run(None, {input_name: image_tensors.cpu().numpy()})[0]
         else:
             outputs = detector.run(None, {input_name: image_tensors.numpy()})[0]
@@ -144,35 +131,33 @@ def detect(detector,
     count = 0
 
     # create dataloader
-    dataloader = manifest_dataloader(manifest, batch_size=batch_size,
-                                     num_workers=num_workers, crop=False,
-                                     normalize=True, letterbox=letterbox,
+    dataloader = manifest_dataloader(manifest,
+                                     crop=False,
+                                     normalize=True,
+                                     letterbox=letterbox,
                                      resize_width=resize_width,
                                      resize_height=resize_height)
 
     start_time = time.time()
-    for _, batch_from_dataloader in tqdm(enumerate(dataloader), total=len(dataloader)):
+    for _, batch in tqdm(enumerate(dataloader), total=len(manifest)):
         count += 1
 
-        image_tensors = batch_from_dataloader[0]  # Tensor of images for the current batch
-        current_image_paths = batch_from_dataloader[1]  # List of image names for the current batch
-        current_frames = batch_from_dataloader[2]  # List of frame numbers for the current batch
-        image_sizes = batch_from_dataloader[3]  # List of original image sizes for the current batch
+        image_tensors = batch[0]  # Tensor of images for the current batch
+        current_image_paths = batch[1]  # List of image names for the current batch
+        current_frames = batch[2]  # List of frame numbers for the current batch
+        image_sizes = batch[3]  # List of original image sizes for the current batch
 
         # ONNX Runtime inference
         input_name = detector.get_inputs()[0].name
-        if device == "cpu":
-            outputs = detector.run(None, {input_name: image_tensors.cpu().numpy()})[0]
-        else:
-            outputs = detector.run(None, {input_name: image_tensors.numpy()})[0]
-
+        outputs = detector.run(None, {input_name: image_tensors})[0]
+    
         # Process outputs to match expected format
-        results.extend(convert_onnx_detections(outputs, image_tensors, current_image_paths, current_frames,
+        results.extend(convert_onnx_detections(outputs, confidence_threshold, image_tensors, current_image_paths, current_frames,
                                                 image_sizes, letterbox))
 
         # Write a checkpoint if necessary
         if checkpoint_frequency != -1 and count % checkpoint_frequency == 0:
-            print('Writing a new checkpoint after having processed {} images since last restart'.format(count*batch_size))
+            print('Writing a new checkpoint after having processed {} images since last restart'.format(count))
             file_management.save_detection_checkpoint(checkpoint_path, results)
 
     print(f"\nFinished detection. Total images processed: {len(results)} at {round(len(results)/(time.time() - start_time), 1)} img/s.")
@@ -182,6 +167,7 @@ def detect(detector,
 
 
 def convert_onnx_detections(predictions: list,
+                            confidence_threshold: float,
                             image_tensors: list,
                             image_paths: list,
                             image_frames: list,
@@ -197,7 +183,7 @@ def convert_onnx_detections(predictions: list,
         category = pred[:, 5]  # Class labels as integers
         max_detection_conf = conf.max() if len(conf) > 0 else 0
 
-        if len(conf) == 0:
+        if len(conf) == 0 or all(c < confidence_threshold for c in conf):
             data = {'filepath': str(image_paths[i]),
                     'frame': int(image_frames[i]),
                     'max_detection_conf': float(round(max_detection_conf, 4)),
@@ -206,6 +192,9 @@ def convert_onnx_detections(predictions: list,
         else:
             detections = []
             for j in range(len(conf)):
+                if conf[j] < confidence_threshold:
+                    continue
+
                 bbox = normalize_boxes(boxes[j], image_tensors[i].shape[1:])
                 bbox = xyxy2xywh(bbox)
                 if bbox.all() == 0:

@@ -43,10 +43,8 @@ Python Package Dependencies
 * scikit-learn>=1.5.2
 * timm>=1.0.9
 * torch>=2.6.0
-* torchaudio>=2.6.0
 * torchvision>=0.21.0
 * tqdm>=4.66.5
-* ultralytics>=8.3.95
 * wget>=3.2
 
 

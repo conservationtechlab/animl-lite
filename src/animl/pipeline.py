@@ -10,7 +10,7 @@ import torch
 import pandas as pd
 
 from animl import (classification, detection, export, file_management,
-                   video_processing, split, model_architecture)
+                   video_processing, split)
 from animl.utils import visualization
 from animl.utils.general import get_device, NUM_THREADS
 
@@ -18,7 +18,6 @@ from animl.utils.general import get_device, NUM_THREADS
 def from_paths(image_dir: str,
                detector_file: str,
                classifier_file: str,
-               classlist_file: str,
                class_label: str = "class",
                batch_size: int = 4,
                sort: bool = True,
@@ -42,8 +41,6 @@ def from_paths(image_dir: str,
     Returns:
         pandas.DataFrame: Concatenated dataframe of animal and empty detections
     """
-    device = get_device()
-
     print("Searching directory...")
     # Create a working directory, build the file manifest from img_dir
     working_dir = file_management.WorkingDirectory(image_dir)
@@ -60,14 +57,11 @@ def from_paths(image_dir: str,
     if (file_management.check_file(working_dir.detections, output_type="Detections")):
         detections = file_management.load_data(working_dir.detections)
     else:
-        detector = detection.load_detector(detector_file, "mdv5", device=device)
+        detector = detection.load_detector(detector_file)
         md_results = detection.detect(detector,
                                       all_frames,
-                                      resize_height=model_architecture.MEGADETECTORv5_SIZE,
-                                      resize_width=model_architecture.MEGADETECTORv5_SIZE,
-                                      batch_size=batch_size,
-                                      num_workers=NUM_THREADS,
-                                      device=device,
+                                      resize_height=detection.MEGADETECTORv5_SIZE,
+                                      resize_width=detection.MEGADETECTORv5_SIZE,
                                       checkpoint_path=working_dir.mdraw,
                                       checkpoint_frequency=1000)
         # Convert MD JSON to pandas dataframe, merge with manifest
@@ -80,13 +74,10 @@ def from_paths(image_dir: str,
 
     # Use the classifier model to predict the species of animal detections
     print("Predicting species of animal detections...")
-    classifier, class_list = classification.load_classifier(classifier_file, classlist_file, device=device)
+    classifier, class_list = classification.load_classifier(classifier_file)
     predictions_raw = classification.classify(classifier, animals,
-                                              device=device,
-                                              resize_height=model_architecture.SDZWA_CLASSIFIER_SIZE,
-                                              resize_width=model_architecture.SDZWA_CLASSIFIER_SIZE,
-                                              batch_size=batch_size,
-                                              num_workers=NUM_THREADS,
+                                              resize_height=classification.SDZWA_CLASSIFIER_SIZE,
+                                              resize_width=classification.SDZWA_CLASSIFIER_SIZE,
                                               out_file=working_dir.predictions)
     if sequence:
         print("Classifying sequences...")
@@ -133,11 +124,7 @@ def from_config(config: str):
 
     # get image dir and cuda defaults
     image_dir = cfg['image_dir']
-
-    #TODO change to onnxruntime
-    device = cfg.get('device', get_device())
-    if device != 'cpu' and not torch.cuda.is_available():
-        device = 'cpu'
+    device = get_device()
 
     print("Searching directory...")
     # Create a working directory, default to image_dir
@@ -159,16 +146,13 @@ def from_config(config: str):
     if (file_management.check_file(working_dir.detections, output_type="Detections")):
         detections = file_management.load_data(working_dir.detections)
     else:
-        detector = detection.load_detector(cfg['detector_file'], model_type=cfg.get('detector_type', 'mdv5'), device=device)
+        detector = detection.load_detector(cfg['detector_file'])
         md_results = detection.detect(detector,
                                       all_frames,
-                                      resize_height=model_architecture.MEGADETECTORv5_SIZE,
-                                      resize_width=model_architecture.MEGADETECTORv5_SIZE,
+                                      resize_height=detection.MEGADETECTORv5_SIZE,
+                                      resize_width=detection.MEGADETECTORv5_SIZE,
                                       letterbox=cfg.get('letterbox', True),
                                       file_col=cfg.get('file_col_detection', 'filepath'),
-                                      batch_size=cfg.get('batch_size', 4),
-                                      num_workers=cfg.get('num_workers', NUM_THREADS),
-                                      device=device,
                                       checkpoint_path=working_dir.mdraw,
                                       checkpoint_frequency=1000)
         # Convert MD JSON to pandas dataframe, merge with manifest
@@ -185,8 +169,8 @@ def from_config(config: str):
     classifier, class_list = classification.load_classifier(cfg['classifier_file'], cfg.get('class_list', None), device=device)
 
     predictions_raw = classification.classify(classifier, animals,
-                                              resize_height=cfg.get('classifier_resize_height', model_architecture.SDZWA_CLASSIFIER_SIZE),
-                                              resize_width=cfg.get('classifier_resize_width', model_architecture.SDZWA_CLASSIFIER_SIZE),
+                                              resize_height=cfg.get('classifier_resize_height', classification.SDZWA_CLASSIFIER_SIZE),
+                                              resize_width=cfg.get('classifier_resize_width', classification.SDZWA_CLASSIFIER_SIZE),
                                               file_col=cfg.get('file_col_classification', 'filepath'),
                                               batch_size=cfg.get('batch_size', 4),
                                               num_workers=cfg.get('num_workers', NUM_THREADS),

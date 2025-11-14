@@ -16,6 +16,8 @@ from animl import generator, file_management
 from animl.utils.general import get_device, softmax, tensor_to_onnx, NUM_THREADS
 
 
+SDZWA_CLASSIFIER_SIZE = 299
+
 def load_classifier(model_path: str,
                     classes: Union[int, str, Path, pd.DataFrame],
                     device: Optional[str] = None):

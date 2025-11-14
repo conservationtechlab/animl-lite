@@ -25,7 +25,7 @@ import pandas as pd
 import animl
 
 
-@unittest.skip
+# @unittest.skip
 def main_test():
     start_time = time.time()
 
@@ -33,16 +33,10 @@ def main_test():
     workingdir = Path.cwd() / 'examples' / 'Southwest' / 'Animl-Directory'
     shutil.rmtree(workingdir, ignore_errors=True)
 
-    megadetector = Path.cwd() / 'models/md_v5a.0.0.pt'
-    if megadetector.exists():
-        megadetector.unlink()
+    megadetector = Path.cwd() / 'models/md_v5a.0.0.onnx'
+    classifier_file = Path.cwd() / 'models/sdzwa_southwest_v3.onnx'
 
-    animl.download_model(animl.MEGADETECTOR['MDV5a'], out_dir='models')
-
-    classifier_file = Path.cwd() / 'models/sdzwa_southwest_v3.pt'
-    class_list_file = Path.cwd() / 'models/sdzwa_southwest_v3_classes.csv'
-
-    animl.from_paths(image_dir, megadetector, classifier_file, class_list_file,
+    animl.from_paths(image_dir, megadetector, classifier_file,
                      sort=True, visualize=True, sequence=False)
 
     results_path = Path(image_dir) / 'Animl-Directory' / 'Data' / 'Results.csv'

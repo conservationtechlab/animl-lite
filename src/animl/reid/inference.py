@@ -8,14 +8,15 @@ from typing import Optional
 from tqdm import tqdm
 import pandas as pd
 import numpy as np
-import torch
 
 import onnxruntime as ort
 
-from animl.reid.miewid import MiewIdNet, MIEWID_SIZE
 from animl.utils.general import get_device
 from animl.generator import manifest_dataloader
 from torchvision.transforms import Compose, Normalize
+
+
+MIEWID_SIZE =440
 
 
 def load_miew(file_path: str,
@@ -33,7 +34,7 @@ def load_miew(file_path: str,
     if device is None:
         device = get_device()
     print(f'Sending model to {device}')
-    miew = ort.InferenceSession("models/miewid_v3.onnx", providers=["CPUExecutionProvider"])
+    miew = ort.InferenceSession(file_path, providers=["CPUExecutionProvider"])
     return miew
 
 

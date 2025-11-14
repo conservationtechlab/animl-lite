@@ -11,11 +11,12 @@ from animl import split
 from animl import utils
 from animl import video_processing
 
-from animl.classification import (classify, load_class_list, load_classifier,
+from animl.classification import (SDZWA_CLASSIFIER_SIZE, classify,
+                                  load_class_list, load_classifier,
                                   sequence_classification,
                                   single_classification,)
-from animl.detection import (convert_onnx_detections, detect, load_detector,
-                             parse_detections,)
+from animl.detection import (MEGADETECTORv5_SIZE, convert_onnx_detections,
+                             detect, load_detector, parse_detections,)
 from animl.export import (export_coco, export_folders, export_megadetector,
                           export_timelapse, remove_link,
                           update_labels_from_folders,)
@@ -25,7 +26,8 @@ from animl.file_management import (IMAGE_EXTENSIONS, VALID_EXTENSIONS,
                                    check_file, load_data, load_json, save_data,
                                    save_detection_checkpoint, save_json,)
 from animl.generator import (Letterbox, ManifestGenerator, collate_fn,
-                             image_to_tensor, manifest_dataloader,)
+                             image_to_tensor, manifest_dataloader,
+                             pil_to_numpy_array,)
 from animl.models import (CLASSIFIER, CLASS_LIST, MD_FILENAMES, MEGADETECTOR,
                           download, download_model, list_models,)
 from animl.pipeline import (from_config, from_paths,)
@@ -79,17 +81,18 @@ __all__ = ['ArcFaceLossAdaptiveMargin', 'ArcFaceSubCenterDynamic',
            'load_classifier_checkpoint', 'load_data', 'load_detector',
            'load_json', 'load_miew', 'make_divisible', 'manifest_dataloader',
            'miewid', 'model_architecture', 'models', 'non_max_suppression',
-           'normalize_boxes', 'parse_detections', 'parse_model', 'pipeline',
-           'plot_all_bounding_boxes', 'plot_box', 'plot_from_file', 'pose',
-           'predict_viewpoints', 'reid', 'remove_diagonal', 'remove_link',
-           'save_classifier', 'save_data', 'save_detection_checkpoint',
-           'save_json', 'scale_coords', 'scale_img', 'scale_letterbox',
-           'sequence_classification', 'single_classification', 'softmax',
-           'split', 'tensor_to_onnx', 'test', 'test_func', 'test_main',
-           'time_sync', 'train', 'train_dataloader', 'train_func',
-           'train_main', 'train_val_test', 'update_labels_from_folders',
-           'utils', 'validate_func', 'video_processing', 'viewpoint',
-           'visualization', 'xyn2xy', 'xywh2xyxy', 'xywhc2xyxy', 'xywhn2xyxy',
-           'xyxy2xywh', 'xyxyc2xywh', 'xyxyc2xywhn', 'yolo']
+           'normalize_boxes', 'parse_detections', 'parse_model',
+           'pil_to_numpy_array', 'pipeline', 'plot_all_bounding_boxes',
+           'plot_box', 'plot_from_file', 'pose', 'predict_viewpoints', 'reid',
+           'remove_diagonal', 'remove_link', 'save_classifier', 'save_data',
+           'save_detection_checkpoint', 'save_json', 'scale_coords',
+           'scale_img', 'scale_letterbox', 'sequence_classification',
+           'single_classification', 'softmax', 'split', 'tensor_to_onnx',
+           'test', 'test_func', 'test_main', 'time_sync', 'train',
+           'train_dataloader', 'train_func', 'train_main', 'train_val_test',
+           'update_labels_from_folders', 'utils', 'validate_func',
+           'video_processing', 'viewpoint', 'visualization', 'xyn2xy',
+           'xywh2xyxy', 'xywhc2xyxy', 'xywhn2xyxy', 'xyxy2xywh', 'xyxyc2xywh',
+           'xyxyc2xywhn', 'yolo']
 
 __version__ = '3.1.0'
