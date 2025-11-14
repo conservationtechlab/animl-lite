@@ -10,55 +10,17 @@ import numpy as np
 from pathlib import Path
 from time import time
 from tqdm import tqdm
-
-import torch
-#import onnxruntime
+import onnxruntime
 
 from animl import generator, file_management
-from animl.model_architecture import EfficientNet, ConvNeXtBase
-from animl.utils.general import get_device, softmax, tensor_to_onnx, NUM_THREADS
+from animl.utils.general import get_device, softmax
 
 
-def save_classifier(model,
-                    out_dir: str,
-                    epoch: int,
-                    stats: dict,
-                    optimizer=None,
-                    scheduler=None):
-    '''
-    Saves model state weights.
-
-    Args:
-        model: pytorch model
-        out_dir (str): directory to save model to
-        epoch (int): current training epoch
-        stats (dict): performance metrics of current epoch
-        optimizer: pytorch optimizer (optional)
-        scheduler: pytorch scheduler (optional)
-
-    Returns:
-        None
-    '''
-    Path(out_dir).mkdir(parents=True, exist_ok=True)
-
-    # get model parameters and add to stats
-    checkpoint = {'model': model.state_dict(),
-                  'stats': stats}
-    # save optimizer and scheduler state dicts if they are provided
-    if optimizer is not None or scheduler is not None:
-        checkpoint['epoch'] = epoch
-    if optimizer is not None:
-        checkpoint['optimizer'] = optimizer.state_dict()
-    if scheduler is not None:
-        checkpoint['scheduler'] = scheduler.state_dict()
-
-    torch.save(checkpoint, open(f'{out_dir}/{epoch}.pt', 'wb'))
+SDZWA_CLASSIFIER_SIZE = 299
 
 
 def load_classifier(model_path: str,
-                    classes: Union[int, str, Path, pd.DataFrame],
-                    device: Optional[str] = None,
-                    architecture: str = "CTL"):
+                    classes: Union[int, str, Path, pd.DataFrame] = None):
     '''
     Creates a model instance and loads the latest model state weights.
 
@@ -74,138 +36,30 @@ def load_classifier(model_path: str,
     '''
     class_list = None
     model_path = Path(model_path)
+    # check to make sure GPU is available if chosen
+    providers = get_device()
+
+    print(f'Loading model at {model_path}')
+    model = onnxruntime.InferenceSession(model_path, providers=providers)
+    model.framework = "onnx"
 
     # get number of classes
     if isinstance(classes, str) or isinstance(classes, Path):
         class_list = load_class_list(classes)
-        num_classes = len(class_list)
     elif isinstance(classes, pd.DataFrame):
         class_list = classes
-        num_classes = len(class_list)
     else:
         class_list = None
-        num_classes = classes
-
-    # check to make sure GPU is available if chosen
-    if device is None:
-        device = get_device()
-
-    # Create a new model intance for training
-    if model_path.is_dir():
-        model_path = str(model_path)
-        start_epoch = 0
-        if (architecture == "CTL") or (architecture == "efficientnet_v2_m"):
-            model = EfficientNet(num_classes, device=device)
-        elif architecture == "convnext_base":
-            model = ConvNeXtBase(num_classes)
-        else:  # can only resume models from a directory at this time
-            raise AssertionError('Please provide the correct model')
-        return model, start_epoch
-
-    # load a specific model file
-    elif model_path.is_file():
-        print(f'Loading model at {model_path}')
-        start_time = time()
-        # PyTorch dict
-        if model_path.suffix == '.pt':
-            if (architecture == "CTL") or (architecture == "efficientnet_v2_m"):
-                model = EfficientNet(num_classes, device=device, tune=False)
-                # TODO: torch 2.6 defaults to weights_only = True, revert on retrain
-                checkpoint = torch.load(model_path, map_location=device, weights_only=False)
-                model.load_state_dict(checkpoint['model'])
-                model.to(device)
-                model.eval()
-                model.framework = "EfficientNet"
-            elif architecture == "convnext_base":
-                model = ConvNeXtBase(num_classes, tune=False)
-                checkpoint = torch.load(model_path, map_location=device)
-                model.load_state_dict(checkpoint['model'])
-                model.to(device)
-                model.eval()
-                model.framework = "ConvNeXt-Base"
-        # PyTorch full modelspeak
-        elif model_path.suffix == '.pth':
-            model = torch.load(model_path, map_location=device)
-            model.to(device)
-            model.eval()
-            model.framework = "pytorch"
-        elif model_path.suffix == '.onnx':
-            providers = ["CPUExecutionProvider"] if device == "cpu" else ["CUDAExecutionProvider", "CPUExecutionProvider"]
-            model = onnxruntime.InferenceSession(model_path,
-                                                 providers=providers)
-            model.framework = "onnx"
-            # try to load class dict from metadata
-            props = model.get_modelmeta().custom_metadata_map
-            if "class_dict" in props:
-                print("Loaded class_dict from ONNX metadata.")
-                class_dict = json.loads(props["class_dict"])
-                class_list = [class_dict[str(i)] for i in range(len(class_dict))]
-                class_list = pd.DataFrame({'class': class_list})
-        else:
-            raise ValueError('Unrecognized model format: {}'.format(model_path))
-        elapsed = time() - start_time
-        print('Loaded model in %.2f seconds' % elapsed)
+    # try to load class dict from metadata
+    props = model.get_modelmeta().custom_metadata_map
+    if "class_dict" in props:
+        print("Loaded class_dict from ONNX metadata.")
+        class_dict = json.loads(props["class_dict"])
+        class_list = [class_dict[str(i)] for i in range(len(class_dict))]
+        class_list = pd.DataFrame({'class': class_list})
 
         # no need to return epoch
-        return model, class_list
-
-    # no dir or file found
-    else:
-        raise ValueError("Model not found at given path")
-
-
-def load_classifier_checkpoint(model_path, model, optimizer, scheduler, device):
-    '''
-    Load checkpoint model weights to resume training.
-
-    Args:
-        model_path: path to saved weights
-        model: loaded model object
-        optimizer: optimizer object
-        scheduler: learning rate scheduler
-        device (str): device to load model and data to
-
-    Returns:
-        starting epoch (int)
-    '''
-    model_states = []
-    for file in Path.iterdir(Path(model_path)):
-        if Path(file).suffix.lower() == ".pt":
-            model_states.append(file)
-
-    if len(model_states):
-        # at least one save state found; get latest
-        model_epochs = [int(m.replace(model_path, '').replace('.pt', '')) for m in model_states]
-        start_epoch = max(model_epochs)
-
-        # load state dict and apply weights to model
-        print(f'Resuming from epoch {start_epoch}')
-        checkpoint = torch.load(open(f'{model_path}/{start_epoch}.pt', 'rb'), map_location=device)
-        model.load_state_dict(checkpoint['model'])
-        # Model is assumed to be on the correct device already (moved in main before optimizer creation)
-
-        # load optimzier state if available
-        if 'optimizer' in checkpoint:
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            # Ensure optimizer's state tensors are on the correct device
-            for state in optimizer.state.values():
-                for k, v in state.items():
-                    if isinstance(v, torch.Tensor) and v.device != device:
-                        state[k] = v.to(device)
-
-        # load scheduler state if available
-        if 'scheduler' in checkpoint:
-            scheduler.load_state_dict(checkpoint['scheduler'])
-
-        # get last epoch from model if avialble
-        if 'epoch' in checkpoint:
-            return checkpoint['epoch']
-        else:
-            return start_epoch
-    else:
-        # no save state found; stasrt anew
-        print('No model state found, starting new model')
-        return 0
+    return model, class_list
 
 
 def load_class_list(classlist_file):
@@ -230,9 +84,6 @@ def classify(model,
              file_col: str = 'filepath',
              crop: bool = True,
              normalize: bool = True,
-             batch_size: int = 1,
-             num_workers: int = NUM_THREADS,
-             device: Optional[str] = None,
              out_file: Optional[str] = None):
     """
     Predict species using classifier model.
@@ -256,9 +107,6 @@ def classify(model,
     if file_management.check_file(out_file, output_type="Classification results"):
         return file_management.load_data(out_file).to_numpy()
 
-    if device is None:
-        device = get_device()
-
     # initialize lists
     raw_output = []
 
@@ -273,42 +121,28 @@ def classify(model,
 
         dataset = generator.manifest_dataloader(detections, file_col=file_col, crop=crop,
                                                 resize_width=resize_width, resize_height=resize_height,
-                                                normalize=normalize, batch_size=batch_size, num_workers=num_workers)
+                                                normalize=normalize)
     # Single File
     elif isinstance(detections, str):
         detections = pd.DataFrame({file_col: detections, 'frame': 0}, index=[0])
         dataset = generator.manifest_dataloader(detections, file_col=file_col, crop=False,
                                                 resize_width=resize_width, resize_height=resize_height,
-                                                normalize=normalize, batch_size=1, num_workers=1)
+                                                normalize=normalize)
     # List of Files
     elif isinstance(detections, list):
         detections = pd.DataFrame({file_col: detections, 'frame': 0}, index=range(len(detections)))
         dataset = generator.manifest_dataloader(detections, file_col=file_col, crop=False,
                                                 resize_width=resize_width, resize_height=resize_height,
-                                                normalize=normalize, batch_size=batch_size, num_workers=1)
+                                                normalize=normalize)
     else:
         raise AssertionError("Input must be a data frame of crops, single file path or vector of file paths.")
 
     # Predict
     start_time = time()
-    with torch.no_grad():
-        for _, batch in tqdm(enumerate(dataset), total=len(dataset)):
-            # pytorch
-            if model.framework == "pytorch" or model.framework == "EfficientNet":
-                data = batch[0]
-                data = data.to(device)
-                output = model(data)
-                raw_output.extend(torch.nn.functional.softmax(output, dim=1).cpu().detach().numpy())
-
-            # onnx
-            elif model.framework == "onnx":
-                data = batch[0]
-                data = tensor_to_onnx(data)
-                output = model.run(None, {model.get_inputs()[0].name: data})[0]
-                raw_output.extend(softmax(output))
-
-            else:
-                raise AssertionError("Model architechture not supported.")
+    for _, batch in tqdm(enumerate(dataset), total=len(detections)):
+        image = batch[0]
+        output = model.run(None, {model.get_inputs()[0].name: image})[0]
+        raw_output.extend(softmax(output))
 
     raw_output = np.vstack(raw_output)
 

@@ -2,6 +2,7 @@
 Video Processing Functions
 
 """
+import os
 import cv2
 from tqdm import tqdm
 import multiprocessing as mp
@@ -11,7 +12,6 @@ from pathlib import Path
 from typing import Optional
 
 from animl import file_management
-from animl.utils.general import NUM_THREADS
 
 
 def extract_frames(files,
@@ -21,7 +21,7 @@ def extract_frames(files,
                    out_dir: str = None,
                    file_col: str = "filepath",
                    parallel: bool = True,
-                   num_workers: int = NUM_THREADS):
+                   num_workers: int = min(8, max(1, os.cpu_count() - 1))):
     """
     Extract frames from video files in a given DataFrame.
     Can sample frames based on a specified number of frames or frames per second (fps).
@@ -34,7 +34,7 @@ def extract_frames(files,
         save (bool): Whether to save the extracted frames manifest to out_file (default is False).
         file_col (str): Column name in the DataFrame that contains the file paths (default is "filepath").
         parallel (bool): Whether to use multiprocessing for frame extraction (default is True).
-        num_workers (int): Number of worker processes to use for parallel processing (default is NUM_THREADS).
+        num_workers (int): Number of worker processes to use for parallel processing (default is min(8, max(1, os.cpu_count() - 1))).
 
     Raises:
         ValueError: If the DataFrame does not contain the specified file column or if both fps and frames are not defined.

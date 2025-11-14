@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 import pandas as pd
 
-from animl import file_management, detection, model_architecture, visualization
+from animl import file_management, detection, visualization, MEGADETECTORv5_SIZE
 
 
 @unittest.skip
@@ -25,8 +25,8 @@ def buow_test():
 
     md_results = detection.detect(detector,
                                   files,
-                                  model_architecture.MEGADETECTORv5_SIZE,
-                                  model_architecture.MEGADETECTORv5_SIZE,
+                                  MEGADETECTORv5_SIZE,
+                                  MEGADETECTORv5_SIZE,
                                   letterbox=False,
                                   file_col="filepath",
                                   batch_size=4,
