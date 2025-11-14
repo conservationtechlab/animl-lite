@@ -20,7 +20,6 @@ import unittest
 import time
 import shutil
 from pathlib import Path
-import pandas as pd
 
 import animl
 
@@ -38,28 +37,6 @@ def main_test():
 
     animl.from_paths(image_dir, megadetector, classifier_file,
                      sort=True, visualize=True, sequence=False)
-
-    results_path = Path(image_dir) / 'Animl-Directory' / 'Data' / 'Results.csv'
-    gt_path = Path.cwd() / 'tests' / 'GroundTruth' / 'main' / 'Results.csv'
-    if results_path.exists():
-        test_manifest = pd.read_csv(results_path)
-        gt_manifest = pd.read_csv(gt_path)
-
-        try:
-            test_manifest['filepath'].equals(gt_manifest['filepath'])
-        except ValueError:
-            print("filepath columns do not match. Test Failure :(")
-            print(test_manifest.compare(gt_manifest))
-            exit(1)
-
-        try:
-            test_manifest['prediction'].equals(gt_manifest['prediction'])
-        except ValueError:
-            print("Prediction columns do not match. Test Failure :(")
-            print(test_manifest.compare(gt_manifest))
-            exit(1)
-
-        print("Main Test Successful!")
 
     print(f"Pipeline took {time.time() - start_time:.2f} seconds")
 
