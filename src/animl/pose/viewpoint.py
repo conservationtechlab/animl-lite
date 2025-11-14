@@ -9,7 +9,7 @@ import torch
 from animl.utils.general import get_device
 from animl.generator import manifest_dataloader
 
-
+# TODO
 def predict_viewpoints(model,
                        manifest,
                        device: Optional[str] = None):

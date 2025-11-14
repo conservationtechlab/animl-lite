@@ -134,6 +134,7 @@ def from_config(config: str):
     # get image dir and cuda defaults
     image_dir = cfg['image_dir']
 
+    #TODO change to onnxruntime
     device = cfg.get('device', get_device())
     if device != 'cpu' and not torch.cuda.is_available():
         device = 'cpu'

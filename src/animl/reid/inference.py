@@ -10,6 +10,8 @@ import pandas as pd
 import numpy as np
 import torch
 
+import onnxruntime as ort
+
 from animl.reid.miewid import MiewIdNet, MIEWID_SIZE
 from animl.utils.general import get_device
 from animl.generator import manifest_dataloader
@@ -31,12 +33,7 @@ def load_miew(file_path: str,
     if device is None:
         device = get_device()
     print(f'Sending model to {device}')
-    weights = torch.load(file_path, weights_only=True)
-    miew = MiewIdNet(device=device)
-    miew.to(device)
-    miew.device = device
-    miew.load_state_dict(weights, strict=False)
-    miew.eval()
+    miew = ort.InferenceSession("models/miewid_v3.onnx", providers=["CPUExecutionProvider"])
     return miew
 
 
@@ -75,10 +72,10 @@ def extract_miew_embeddings(miew_model,
                                          resize_width=MIEWID_SIZE,
                                          resize_height=MIEWID_SIZE,
                                          transform=transform)
-        with torch.no_grad():
-            for _, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
-                img = batch[0]
-                emb = miew_model.extract_feat(img.to(device))
-                output.extend(emb.detach().cpu().numpy())
+        for _, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
+            img = batch[0]
+            inp = miew_model.get_inputs()[0]
+            outputs = miew_model.run(None, {inp.name: img})[0]
+            output.extend(outputs)
         output = np.vstack(output)
     return output

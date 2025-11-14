@@ -12,9 +12,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
-
-import torch
-from ultralytics import YOLO
+import onnxruntime as ort
 
 from animl import file_management
 from animl.model_architecture import MEGADETECTORv5_SIZE
@@ -23,7 +21,6 @@ from animl.utils.general import normalize_boxes, xyxy2xywh, scale_letterbox, non
 
 
 def load_detector(model_path: str,
-                  model_type: str,
                   device: Optional[str] = None):
     """
     Load Detector model from filepath.
@@ -42,36 +39,11 @@ def load_detector(model_path: str,
     if device is None:
         device = get_device()
 
-    # YOLOv5/MDv5
-    if model_type.lower() in {"mdv5", "yolov5"}:
-        checkpoint = torch.load(model_path, map_location=device, weights_only=False)
-        # Compatibility fix that allows older YOLOv5 models with
-        # newer versions of YOLOv5/PT
-        if hasattr(checkpoint['model'], 'modules'):
-            for m in checkpoint['model'].modules():
-                t = type(m)
-                if t is torch.nn.Upsample and not hasattr(m, 'recompute_scale_factor'):
-                    m.recompute_scale_factor = None
-        model = checkpoint['model'].float().fuse().eval()  # FP32 model
-        model.model_type = "yolov5"
-        model.to(device)
-        return model
-    # YOLOv6+
-    elif model_type.lower() in {"yolo", "mdv6", "mdv1000"}:
-        model = YOLO(model_path, task='detect')
-        model.model_type = "yolo"
-        model.to(device)
-        return model
     # ONNX model
-    elif model_type.lower() in {"onnx"}:
-        import onnxruntime as ort
-        providers = ["CPUExecutionProvider"] if device == "cpu" else ["CUDAExecutionProvider", "CPUExecutionProvider"]
-        model = ort.InferenceSession(model_path, providers=providers)
-        model.model_type = "onnx"
-        return model
-    else:
-        print(f"Please chose a supported model. Version {model_type} is not supported.")
-        return None
+    providers = ["CPUExecutionProvider"] if device == "cpu" else ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    model = ort.InferenceSession(model_path, providers=providers)
+    model.model_type = "onnx"
+    return model
 
 
 def detect(detector,
@@ -122,14 +94,14 @@ def detect(detector,
         image_tensors = batch_from_dataloader[0]  # Tensor of images for the current batch
         current_image_paths = batch_from_dataloader[1]  # List of image names for the current batch
         image_sizes = batch_from_dataloader[2]  # List of original image sizes for the current batch
-        if detector.model_type == "yolov5":
-            # letterboxing should be true
-            prediction = detector(image_tensors.to(device))
-            pred: list = prediction[0]
-            pred = non_max_suppression(prediction=pred, conf_thres=confidence_threshold)
+
+        input_name = detector.get_inputs()[0].name
+        if device == "cpu":
+            outputs = detector.run(None, {input_name: image_tensors.cpu().numpy()})[0]
         else:
-            pred = detector.predict(source=image_tensors.to(device), conf=confidence_threshold, verbose=False)
-        results = convert_yolo_detections(pred, image_tensors, current_image_paths, image_sizes, letterbox, detector.model_type)
+            outputs = detector.run(None, {input_name: image_tensors.numpy()})[0]
+
+        results = convert_onnx_detections(outputs, image_tensors, current_image_paths, image_sizes, letterbox, detector.model_type)
         return results
 
     # Full manifest, select file_col
@@ -187,31 +159,16 @@ def detect(detector,
         current_frames = batch_from_dataloader[2]  # List of frame numbers for the current batch
         image_sizes = batch_from_dataloader[3]  # List of original image sizes for the current batch
 
-        # Run inference on the current batch of image_tensors
-        if detector.model_type == "yolov5":
-            # letterboxing should be true
-            prediction = detector(image_tensors.to(device))
-            pred: list = prediction[0]
-            pred = non_max_suppression(prediction=pred, conf_thres=confidence_threshold)
-            # convert to normalized xywh
-            results.extend(convert_yolo_detections(pred, image_tensors, current_image_paths, current_frames,
-                                                   image_sizes, letterbox, detector.model_type))
-        elif detector.model_type == "onnx":
-            # ONNX Runtime inference
-            input_name = detector.get_inputs()[0].name
-            if device == "cpu":
-                outputs = detector.run(None, {input_name: image_tensors.cpu().numpy()})[0]
-            else:
-                outputs = detector.run(None, {input_name: image_tensors.numpy()})[0]
-
-            # Process outputs to match expected format
-            results.extend(convert_onnx_detections(outputs, image_tensors, current_image_paths, current_frames,
-                                                   image_sizes, letterbox))
+        # ONNX Runtime inference
+        input_name = detector.get_inputs()[0].name
+        if device == "cpu":
+            outputs = detector.run(None, {input_name: image_tensors.cpu().numpy()})[0]
         else:
-            pred = detector.predict(source=image_tensors.to(device), conf=confidence_threshold, verbose=False)
-            # convert to normalized xywh
-            results.extend(convert_yolo_detections(pred, image_tensors, current_image_paths, current_frames,
-                                                   image_sizes, letterbox, detector.model_type))
+            outputs = detector.run(None, {input_name: image_tensors.numpy()})[0]
+
+        # Process outputs to match expected format
+        results.extend(convert_onnx_detections(outputs, image_tensors, current_image_paths, current_frames,
+                                                image_sizes, letterbox))
 
         # Write a checkpoint if necessary
         if checkpoint_frequency != -1 and count % checkpoint_frequency == 0:
@@ -274,101 +231,6 @@ def convert_onnx_detections(predictions: list,
 
     return results
 
-
-def convert_yolo_detections(predictions: list,
-                            image_tensors: list,
-                            image_paths: list,
-                            image_frames: list,
-                            image_sizes: list,
-                            letterbox: bool,
-                            model_type: str,) -> pd.DataFrame:
-    """
-    Converts YOLO output into a nested list.
-
-    Args:
-        predictions (list): YOLO detection output (list of dictionaries with detections for each file)
-        image_tensors (list): array of image tensors from mdv6 output
-        image_paths (list): List of image file paths corresponding to predictions
-        image_sizes (list): List of original image sizes corresponding to predictions
-        letterbox (bool): whether letterboxing was used during preprocessing
-        model_type (str): type of model expected ["MDV5", "MDV6", "YOLO"]
-
-    Returns:
-        results (list): Formatted YOLO outputs, nested list of dictionaries
-    """
-    # convert to numpy if needed
-    if isinstance(image_sizes, torch.Tensor):
-        image_sizes = image_sizes.cpu().numpy()
-    if isinstance(image_tensors, torch.Tensor):
-        image_tensors = image_tensors.cpu().numpy()
-    if isinstance(image_frames, torch.Tensor):
-        image_frames = image_frames.cpu().numpy()
-
-    results = []
-
-    # loop over all predictions
-    for i, pred in enumerate(predictions):
-        file = image_paths[i]
-
-        # extract boxes and conf
-        # YOLOv5/MDv5
-        if model_type.lower() in {"mdv5", "yolov5"}:
-            if isinstance(pred, torch.Tensor):
-                pred = pred.cpu().numpy()
-            boxes = pred[:, :4]  # Bounding box coordinates
-            conf = pred[:, 4]  # Confidence scores
-            category = pred[:, 5]  # Class labels as integers
-            max_detection_conf = conf.max() if len(conf) > 0 else 0
-        # YOLOv6+
-        elif model_type.lower() in {"yolo", "mdv6", "mdv1000"}:
-            boxes = pred.boxes.xyxyn.cpu().numpy()  # Bounding box coordinates
-            conf = pred.boxes.conf.cpu().numpy()  # Confidence scores
-            category = pred.boxes.cls.cpu().numpy()  # Class labels as integers
-            max_detection_conf = conf.max() if len(conf) > 0 else 0
-        else:
-            print(f"Please chose a supported model. Version {model_type} is not supported.")
-            return None
-
-        # no detections
-        if len(conf) == 0:
-            data = {'filepath': str(file),
-                    'frame': int(image_frames[i]),
-                    'max_detection_conf': float(round(max_detection_conf, 4)),
-                    'detections': []}
-            results.append(data)
-        # detections
-        else:
-            detections = []
-            for j in range(len(conf)):
-                # YOLOv5/MDv5
-                if model_type.lower() in {'mdv5', 'yolov5'}:  # xyxy absolute
-                    bbox = normalize_boxes(boxes[j], image_tensors[i].shape[1:])
-                    bbox = xyxy2xywh(bbox)
-                # YOLOv6+
-                elif model_type.lower() in {'yolo', "mdv6", "mdv1000"}:  # xyxy relative
-                    bbox = xyxy2xywh(boxes[j])
-                else:
-                    print(f"Please chose a supported model. Version {model_type} is not supported.")
-                    return None
-
-                if letterbox:
-                    bbox = scale_letterbox(bbox, image_tensors[i].shape[1:], image_sizes[i, :])
-
-                data = {'category': int(category[j]+1),
-                        'conf': float(round(conf[j], 4)),
-                        'bbox_x': float(round(bbox[0], 4)),
-                        'bbox_y': float(round(bbox[1], 4)),
-                        'bbox_w': float(round(bbox[2], 4)),
-                        'bbox_h': float(round(bbox[3], 4))}
-                detections.append(data)
-
-            data = {'filepath': str(file),
-                    'frame': int(image_frames[i]),
-                    'max_detection_conf': float(round(max_detection_conf, 4)),
-                    'detections': detections}
-            results.append(data)
-
-    return results
 
 
 def parse_detections(results: list,
@@ -473,7 +335,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    detector = load_detector(args.detector, args.model_type)
+    detector = load_detector(args.detector)
     manifest = file_management.load_data(args.manifest)
 
     mdresults = detect(detector, manifest, args.resize_width, args.resize_height, args.letterbox,
