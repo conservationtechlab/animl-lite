@@ -13,10 +13,8 @@ import onnxruntime as ort
 
 from animl.utils.general import get_device
 from animl.generator import manifest_dataloader
-from torchvision.transforms import Compose, Normalize
 
-
-MIEWID_SIZE =440
+MIEWID_SIZE = 440
 
 
 def load_miew(file_path: str,
@@ -66,13 +64,12 @@ def extract_miew_embeddings(miew_model,
 
     output = []
     if isinstance(manifest, pd.DataFrame):
-        transform = Compose([Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),])
 
         dataloader = manifest_dataloader(manifest, batch_size=batch_size, num_workers=num_workers,
-                                         file_col=file_col, crop=True, normalize=True,
+                                         file_col=file_col, crop=True, 
+                                         normalize={"mean": [0.485, 0.456, 0.406], "std": [0.229, 0.224, 0.225]},
                                          resize_width=MIEWID_SIZE,
-                                         resize_height=MIEWID_SIZE,
-                                         transform=transform)
+                                         resize_height=MIEWID_SIZE,)
         for _, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
             img = batch[0]
             inp = miew_model.get_inputs()[0]

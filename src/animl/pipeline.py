@@ -39,8 +39,8 @@ def from_paths(image_dir: str,
     Returns:
         pandas.DataFrame: Concatenated dataframe of animal and empty detections
     """
-    print("Searching directory...")
     # Create a working directory, build the file manifest from img_dir
+    print("Searching directory...")
     working_dir = file_management.WorkingDirectory(image_dir)
     files = file_management.build_file_manifest(image_dir,
                                                 out_file=working_dir.filemanifest,
@@ -124,7 +124,6 @@ def from_config(config: str):
 
     # get image dir and cuda defaults
     image_dir = cfg['image_dir']
-    device = get_device()
 
     print("Searching directory...")
     # Create a working directory, default to image_dir
@@ -166,9 +165,10 @@ def from_config(config: str):
     # Use the classifier model to predict the species of animal detections
     print("Predicting species...")
     # Load classifier
-    classifier, class_list = classification.load_classifier(cfg['classifier_file'], cfg.get('class_list', None), device=device)
+    classifier, class_list = classification.load_classifier(cfg['classifier_file'], cfg.get('class_list', None))
 
-    predictions_raw = classification.classify(classifier, animals,
+    predictions_raw = classification.classify(classifier,
+                                              animals,
                                               resize_height=cfg.get('classifier_resize_height', classification.SDZWA_CLASSIFIER_SIZE),
                                               resize_width=cfg.get('classifier_resize_width', classification.SDZWA_CLASSIFIER_SIZE),
                                               file_col=cfg.get('file_col_classification', 'filepath'),

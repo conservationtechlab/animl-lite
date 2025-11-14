@@ -123,11 +123,11 @@ def detect(detector,
 
     # create dataloader
     dataloader = manifest_dataloader(manifest,
-                                      crop=False,
-                                      normalize=True,
-                                      letterbox=letterbox,
-                                      resize_width=resize_width,
-                                      resize_height=resize_height)
+                                     crop=False,
+                                     normalize=True,
+                                     letterbox=letterbox,
+                                     resize_width=resize_width,
+                                     resize_height=resize_height)
 
     start_time = time.time()
     for _, batch in tqdm(enumerate(dataloader), total=len(manifest)):

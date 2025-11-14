@@ -10,7 +10,7 @@ values scaled to [0, 1]. Batching is provided by a simple Python generator.
 """
 import cv2
 import numpy as np
-from typing import Tuple, List, Optional, Iterable
+from typing import Tuple, List, Optional, Iterable, Sequence
 import pandas as pd
 from pathlib import Path
 from PIL import Image, ImageFile, ImageOps
@@ -21,24 +21,13 @@ from animl.file_management import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
-class Letterbox:
-    """
-    Pads a crop to given size using PIL and resizes.
 
-    Works on PIL.Image objects and returns a PIL.Image.
-
-    Args:
-        resize_height (int)
-        resize_width (int)
-    """
-    def __init__(self, resize_height: int, resize_width: int) -> None:
-        self.resize_height = int(resize_height)
-        self.resize_width = int(resize_width)
-
-    def __call__(self, image: Image.Image) -> Image.Image:
+def Letterbox(resize_height: int,
+              resize_width: int,
+              image: Image.Image) -> Image.Image:
         # PIL image size: (width, height)
         width, height = image.size
-        target_w, target_h = self.resize_width, self.resize_height
+        target_w, target_h = resize_width, resize_height
 
         # If aspect ratios are already the same (rounded to 2 decimals), just resize
         if round((width / height), 2) == round((target_w / target_h), 2):
@@ -64,6 +53,37 @@ class Letterbox:
             padded = ImageOps.expand(image, border=(0, pad_top, 0, pad_bottom), fill=0)
 
         return padded.resize((target_w, target_h), Image.BILINEAR)
+
+
+def Normalize(img: np.ndarray,
+              mean: Sequence[float],
+              std: Sequence[float],
+              channel_axis: int = 0,
+              scale: bool = False,
+              out_dtype: Optional[np.dtype] = np.float32) -> np.ndarray:
+    """
+    Normalize image(s) with (img - mean) / std.
+
+    img: HWC or CHW single image or batched NHWC/NCHW array.
+    mean/std: length == n_channels (e.g., 3).
+    channel_axis: axis index of channels, default -1 (H,W,C).
+    scale: if True and img dtype is integer, divide by 255.0 first.
+    out_dtype: output dtype (usually float32).
+    """
+    a = img.astype(out_dtype, copy=False)
+    if scale and np.issubdtype(img.dtype, np.integer):
+        a = a / 255.0
+
+    mean = np.array(mean, dtype=out_dtype)
+    std = np.array(std, dtype=out_dtype)
+
+    # reshape mean/std to broadcast over image dims
+    shape = [1] * a.ndim
+    shape[channel_axis] = mean.size
+    mean = mean.reshape(shape)
+    std = std.reshape(shape)
+
+    return (a - mean) / std
 
 
 def pil_to_numpy_array(img: Image.Image) -> np.ndarray:
@@ -94,8 +114,7 @@ class ManifestGenerator:
                  crop: bool = True,
                  crop_coord: str = 'relative',
                  normalize: bool = True,
-                 letterbox: bool = False,
-                 transform=None) -> None:
+                 letterbox: bool = False) -> None:
         self.x = x.reset_index(drop=True)
         self.file_col = file_col
         if self.file_col not in self.x.columns:
@@ -110,9 +129,8 @@ class ManifestGenerator:
         self.resize_height = int(resize_height)
         self.resize_width = int(resize_width)
         self.buffer = 0
-        self.normalize = bool(normalize)
+        self.normalize = normalize
         self.letterbox = bool(letterbox)
-        self.transform = transform  # optional callable(PIL.Image)->PIL.Image
 
     def __len__(self) -> int:
         return len(self.x)
@@ -170,21 +188,24 @@ class ManifestGenerator:
             bottom = min(height, int(bottom) + self.buffer)
             img = img.crop((left, top, right, bottom))
 
-        # apply transforms (PIL -> PIL) if provided, otherwise perform resize/letterbox
-        if self.transform is not None:
-            img = self.transform(img)
+        # Letterbox
+        if self.letterbox:
+            img = Letterbox(self.resize_height, self.resize_width, img)
         else:
-            if self.letterbox:
-                img = Letterbox(self.resize_height, self.resize_width)(img)
-            else:
-                img = img.resize((self.resize_width, self.resize_height), Image.BILINEAR)
+            img = img.resize((self.resize_width, self.resize_height), Image.BILINEAR)
 
         img_arr = pil_to_numpy_array(img)  # C,H,W
         img.close()
 
-        if not self.normalize:
+        # Normalize
+        if isinstance(self.normalize, dict):
+            img_arr = Normalize(img_arr,
+                                mean=self.normalize.get("mean", [0.485, 0.456, 0.406]),
+                                std=self.normalize.get("std", [0.229, 0.224, 0.225]))
+        elif self.normalize is False:
+            # unnormalize back to [0,255] if needed
             img_arr = img_arr * 255.0
-
+            
         # return: img as numpy array (C,H,W), filepath str, frame int, shape np.array(height,width)
         return img_arr, str(filepath), int(frame), np.array((height, width), dtype=np.int32)
 
@@ -214,8 +235,7 @@ def manifest_dataloader(manifest: pd.DataFrame,
                         normalize: bool = True,
                         letterbox: bool = False,
                         resize_height: int = 299,
-                        resize_width: int = 299,
-                        transform=None) -> Iterable[Tuple[np.ndarray, List[str], np.ndarray, np.ndarray]]:
+                        resize_width: int = 299) -> Iterable[Tuple[np.ndarray, List[str], np.ndarray, np.ndarray]]:
     '''
     Return a simple generator that yields batches of data as numpy arrays.
 
@@ -240,8 +260,7 @@ def manifest_dataloader(manifest: pd.DataFrame,
                                          normalize=normalize, 
                                          letterbox=letterbox,
                                          resize_width=resize_width,
-                                         resize_height=resize_height,
-                                         transform=transform)
+                                         resize_height=resize_height)
     def batch_generator():
         for i in range(len(dataset_instance)):
             item = dataset_instance[i]

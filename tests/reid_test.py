@@ -4,7 +4,6 @@ import numpy as np
 from pathlib import Path
 
 import animl
-from animl.utils.general import NUM_THREADS
 
 
 # NOTE: DIFFERENT OUTPUT ON SECOND RUN, MAYBE RELATED TO SEED?
@@ -20,9 +19,7 @@ def reid_test():
     miew = animl.load_miew(miew_path)
     embeddings = animl.extract_miew_embeddings(miew,
                                                manifest,
-                                               file_col="filepath",
-                                               batch_size=4,
-                                               num_workers=NUM_THREADS)
+                                               file_col="filepath")
 
     e2 = animl.compute_distance_matrix(embeddings, embeddings, metric='euclidean')
     cos = animl.compute_distance_matrix(embeddings, embeddings, metric='cosine')
