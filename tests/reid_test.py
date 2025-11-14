@@ -13,7 +13,7 @@ def reid_test():
     start_time = time.time()
 
     manifest_path = Path.cwd() / 'examples' / 'Jaguar' / 'reid_manifest.csv'
-    miew_path = Path.cwd() / 'models/miewid_v3.bin'
+    miew_path = Path.cwd() / 'models/miewid_v3.onnx'
     manifest = animl.load_data(manifest_path)
 
     miew = animl.load_miew(miew_path)
