@@ -257,7 +257,6 @@ def save_detection_checkpoint(checkpoint_path: str, results: dict) -> None:
         checkpoint_path (str): the path to the checkpoint file
         results (list): a list of detection results to save
     """
-    assert checkpoint_path is not None
     # Back up any previous checkpoints, to protect against crashes while we're writing
     # the checkpoint file.
     checkpoint_tmp_path = None

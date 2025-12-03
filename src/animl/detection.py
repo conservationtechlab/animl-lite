@@ -100,7 +100,7 @@ def detect(detector,
         manifest = image_file_names[[file_col, 'frame']]
 
     # load checkpoint
-    if file_management.check_file(checkpoint_path, output_type="Megadetector raw output"):
+    if checkpoint_path and file_management.check_file(checkpoint_path, output_type="Megadetector raw output"):
         results = file_management.load_json(checkpoint_path).get('images')
         already_processed = set([r['filepath'] for r in results])
         manifest = image_file_names[~image_file_names[file_col].isin(already_processed)][[file_col, 'frame']].reset_index(drop=True)
@@ -144,7 +144,8 @@ def detect(detector,
             file_management.save_detection_checkpoint(checkpoint_path, results)
 
     print(f"\nFinished detection. Total images processed: {len(results)} at {round(len(results)/(time.time() - start_time), 1)} img/s.")
-    file_management.save_detection_checkpoint(checkpoint_path, results)
+    if checkpoint_path:
+        file_management.save_detection_checkpoint(checkpoint_path, results)
 
     return results
 
