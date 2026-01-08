@@ -16,12 +16,11 @@ Paths to model files must be edited to local machine.
 
 @ Kyra Swanson, 2023
 '''
+from animl import pipeline
 import time
 import argparse
 from pathlib import Path
 
-from animl import pipeline
-import animl.models.download as models
 
 # Start timer
 start_time = time.time()
@@ -40,7 +39,13 @@ parser.add_argument('--classifier', type=str, nargs='?',
                     default=Path(home / 'sdzwa_southwest_v3.pt'))
 parser.add_argument('--classlist', type=str, nargs='?',
                     help='Path to class list',
-                    default=Path(home / 'sdzwa_southwest_v3_classes.csv'))
+                    default=None)
+parser.add_argument('--detect_only', '-d', action='store_true',
+                    help='Run detection only, skip classification')
+parser.add_argument('--sort', '-s', action='store_true',
+                    help='Sort images into subfolders based on classification')
+parser.add_argument('--visualize', '-v', action='store_true',
+                    help='Visualize detections and classifications on images')
 args = parser.parse_args()
 
 # first argument is config file
@@ -50,21 +55,16 @@ if Path(args.imagedir_config).is_file():
 # first argument is a directory
 else:
     if not Path(args.detector).is_file():
-        prompt = "MegaDetector not found, would you like to download? y/n: "
-        if input(prompt).lower() == "y":
-            models.download_model(models.MEGADETECTOR['MDV5a'], out_dir=home)
+        raise FileNotFoundError("MegaDetector not found, must be an .onnx file.")
 
     if not Path(args.classifier).is_file():
-        prompt = "Classifier not found, would you like to download Southwest_v3? y/n: "
-        if input(prompt).lower() == "y":
-            models.download_model(models.CLASSIFIER['SDZWA_Southwest_v3'], out_dir=home)
+        raise FileNotFoundError("Classifier not found, must be a .onnx file.")
 
     if not Path(args.classlist).is_file():
-        prompt = "Class list not found, would you like to download Southwest_v3? y/n: "
-        if input(prompt).lower() == "y":
-            models.download_model(models.CLASS_LIST['SDZWA_Southwest_v3'], out_dir=home)
+        raise FileNotFoundError("Class list not found, must be a .csv file.")
 
     # Call the main function
-    pipeline.from_paths(args.imagedir_config, args.detector, args.classifier, args.classlist)
+    pipeline.from_paths(args.imagedir_config, args.detector, args.classifier, args.classlist,
+                        sort=args.sort, visualize=args.visualize, detect_only=args.detect_only)
 
 print(f"Pipeline took {time.time() - start_time:.2f} seconds")
