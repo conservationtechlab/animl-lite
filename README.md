@@ -141,34 +141,6 @@ animl.export_megadetector(csv_loc, imagedir + "final_result.json")
 manifest = animl.export_folders(manifest, out_dir=working_dir.linkdir, out_file=working_dir.results)
 ```
 
----
-### Training
-
-Training workflows are still under development. Please submit Issues as you come upon them.
-
-1. Assuming a file manifest of training data with species labels, first split the data into training, validation and test splits.
-   This function splits each label proportionally by the given percentages, by default 0.7 training, 0.2 validation, 0.1 Test.
-```python
-train, val, test, stats = animl.train_val_test(manifest, out_dir='path/to/save/data/', label_col="species",
-                                               percentage=(0.7, 0.2, 0.1), seed=None)
-```
-
-2. Set up training configuration file. Specify the paths to the data splits from the previous step. See [config README]()
-
-3. (Optional) Update train.py to include MLOPS connection. 
-
-4. Using the config file, begin training
-```bash
-python -m animl.train --config /path/to/config.yaml
-```
-Every 10 epochs (or define custom 'checkpoint_frequency'), the model will be checkpointed to the 'experiment_folder' parameter in the config file, and will contain performance metrics for selection.
-
-
-5. Testing of a model checkpoint can be done with the "test.py" module.  Add an 'active_model' parameter to the config file that contains the path of the checkpoint to test.
-   This will produce a confusion matrix of the test dataset as well as a csv containing predicted and ground truth labels for each image.
-```bash
-python -m animl.test --config /path/to/config.yaml
-```
 
 # Models
 

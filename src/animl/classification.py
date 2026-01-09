@@ -20,7 +20,8 @@ SDZWA_CLASSIFIER_SIZE = 299
 
 
 def load_classifier(model_path: str,
-                    classes: Union[int, str, Path, pd.DataFrame] = None):
+                    classes: Union[int, str, Path, pd.DataFrame] = None,
+                    device: Optional[str] = None):
     '''
     Creates a model instance and loads the latest model state weights.
 
@@ -37,7 +38,7 @@ def load_classifier(model_path: str,
     class_list = None
     model_path = Path(model_path)
     # check to make sure GPU is available if chosen
-    providers = get_onnx_device()
+    providers = get_onnx_device(user_set=device)
 
     print(f'Loading model at {model_path}')
     model = onnxruntime.InferenceSession(model_path, providers=providers)
@@ -96,9 +97,6 @@ def classify(model,
         file_col (str): column name containing file paths
         crop (bool): use bbox to crop images before feeding into model
         normalize (bool): normalize the tensor before inference
-        batch_size (int): data generator batch size
-        num_workers (int): number of cores
-        device (str): specify to run model on cpu or gpu, default to cpu
         out_file (str): path to save prediction results to
 
     Returns:

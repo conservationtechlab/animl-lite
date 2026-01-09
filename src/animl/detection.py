@@ -21,7 +21,7 @@ from animl.utils.general import normalize_boxes, xyxy2xywh, scale_letterbox, get
 MEGADETECTORv5_SIZE = 1280
 
 
-def load_detector(model_path: str):
+def load_detector(model_path: str, device: Optional[str] = None):
     """
     Load Detector model from filepath.
 
@@ -36,7 +36,7 @@ def load_detector(model_path: str):
     if not Path(model_path).is_file():
         raise FileNotFoundError(f"Model file not found at {model_path}")
 
-    providers = get_onnx_device()
+    providers = get_onnx_device(user_set=device)
     model = ort.InferenceSession(model_path, providers=providers)
     model.model_type = "onnx"
     return model
