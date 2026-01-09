@@ -26,19 +26,42 @@ def tensor_to_onnx(tensor, channel_last=False):
     return tensor
 
 
-def get_device(quiet=False):
+def get_onnx_device(user_set=None, quiet=False):
     """
     Get gpu if available
     """
-    if "CUDAExecutionProvider" in ort.get_available_providers():
-        if not quiet:
-            print("CUDA is available. Using GPU for inference.")
-        return ["CUDAExecutionProvider", "CPUExecutionProvider"]
-    else:
-        if not quiet:
-            print("CUDA is not available (onnxruntime CPU-only).")
-        return ["CPUExecutionProvider"]
+    providers = ort.get_available_providers()
+    if 'CUDAExecutionProvider' in providers:
+        # user selects cuda device and is available
+        if user_set == 'cpu':
+            if not quiet:
+                print('CUDA is available but set to cpu by user.')
+                providers = ['CPUExecutionProvider']
+        # user selects cuda device and is available
+        elif user_set in {'cuda', 'cuda:0', 'cuda:1', 'cuda:2', 'cuda:3'}:
+            device_number = int(user_set.split(':')[-1]) if ':' in user_set else 0
+            providers = [('CUDAExecutionProvider', {'device_id': device_number}), 'CPUExecutionProvider']
+            if not quiet:
+                print(f'Attempting to use CUDA device: {user_set}')
+        # no user input
+        elif user_set is None:
+            if not quiet:
+                print('Using available CUDA device.')
+            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']     
+        # unknown user input
+        else:
+            if not quiet:
+                print('User-specified device unknown, using available CUDA device.')
+            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
 
+    # cuda not available
+    else:
+        if user_set is not None and user_set in {'cuda', 'cuda:0', 'cuda:1', 'cuda:2', 'cuda:3'}:
+            if not quiet:
+                print('Warning: CUDA device specified but not available, using CPU instead.')
+            providers = ['CPUExecutionProvider']
+    
+    return providers
  
 # ==============================================================================
 # COORDINATE CONVERSION

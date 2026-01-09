@@ -13,7 +13,7 @@ from tqdm import tqdm
 import onnxruntime
 
 from animl import generator, file_management
-from animl.utils.general import get_device, softmax
+from animl.utils.general import get_onnx_device, softmax
 
 
 SDZWA_CLASSIFIER_SIZE = 299
@@ -37,7 +37,7 @@ def load_classifier(model_path: str,
     class_list = None
     model_path = Path(model_path)
     # check to make sure GPU is available if chosen
-    providers = get_device()
+    providers = get_onnx_device()
 
     print(f'Loading model at {model_path}')
     model = onnxruntime.InferenceSession(model_path, providers=providers)

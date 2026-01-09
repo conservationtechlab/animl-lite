@@ -11,7 +11,7 @@ import numpy as np
 
 import onnxruntime as ort
 
-from animl.utils.general import get_device
+from animl.utils.general import get_onnx_device
 from animl.generator import manifest_dataloader
 
 MIEWID_SIZE = 440
@@ -29,10 +29,9 @@ def load_miew(file_path: str,
     Returns:
         loaded miewid model object
     """
-    if device is None:
-        device = get_device()
+    device = get_onnx_device(user_set=device)
     print(f'Sending model to {device}')
-    miew = ort.InferenceSession(file_path, providers=["CPUExecutionProvider"])
+    miew = ort.InferenceSession(file_path, providers=device)
     return miew
 
 

@@ -16,7 +16,7 @@ import onnxruntime as ort
 
 from animl import file_management
 from animl.generator import manifest_dataloader
-from animl.utils.general import normalize_boxes, xyxy2xywh, scale_letterbox, get_device
+from animl.utils.general import normalize_boxes, xyxy2xywh, scale_letterbox, get_onnx_device
 
 MEGADETECTORv5_SIZE = 1280
 
@@ -36,7 +36,7 @@ def load_detector(model_path: str):
     if not Path(model_path).is_file():
         raise FileNotFoundError(f"Model file not found at {model_path}")
 
-    providers = get_device()
+    providers = get_onnx_device()
     model = ort.InferenceSession(model_path, providers=providers)
     model.model_type = "onnx"
     return model
@@ -302,7 +302,7 @@ if __name__ == '__main__':
     parser.add_argument('--file_col', nargs='?', help='Path to config file', default='frame')
     parser.add_argument('--batch_size', nargs='?', help='Path to config file', default=4)
     parser.add_argument('--num_workers', nargs='?', help='Path to config file', default=4)
-    parser.add_argument('--device', nargs='?', help='Path to config file', default=get_device())
+    parser.add_argument('--device', nargs='?', help='Path to config file', default=None)
 
     args = parser.parse_args()
 
