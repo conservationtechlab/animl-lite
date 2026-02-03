@@ -1,6 +1,6 @@
 [project]
 name = "animl-lite"  
-version = "3.1.1"
+version = "3.2.0"
 description = "Tools for classifying camera trap images"  
 
 readme = "README.md" 
@@ -13,7 +13,7 @@ requires-python = ">=3.12"
 dependencies = [
     "numpy>=2.0.2", 
     "onnxruntime-gpu>=1.23.2", 
-    "pandas>=2.2.2", 
+    "pandas>=2.2.2,<3.0.0", 
     "pillow>=11.0.0", 
     "pyyaml>=6.0.3",
     "opencv-python>=4.12.0.88", 
@@ -23,18 +23,6 @@ dependencies = [
 [project.urls]  # Optional
 "Homepage" = "https://github.com/conservationtechlab/animl-py"
 
-
-# The following would provide a command line executable called `sample`
-# which executes the function `main` from this package when invoked.
-#[project.scripts]  # Optional
-#sample = "sample:main"
-
-# This is configuration specific to the `setuptools` build backend.
-# If you are using a different build backend, you will need to change this.
-#[tool.setuptools]
-# If there are data files included in your packages that need to be
-# installed, specify them here.
-#package-data = {"sample" = ["*.dat"]}
 
 [build-system]
 # These are the assumed default build requirements from pip:
