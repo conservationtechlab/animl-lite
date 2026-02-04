@@ -16,7 +16,7 @@ import onnxruntime as ort
 
 from animl import file_management
 from animl.generator import manifest_dataloader
-from animl.utils.general import normalize_boxes, xyxy2xywh, scale_letterbox, get_device
+from animl.utils.general import normalize_boxes, xyxy2xywh, scale_letterbox, get_onnx_device
 
 MEGADETECTORv5_SIZE = 1280
 
@@ -27,7 +27,7 @@ def load_detector(model_path: str):
 
     Args:
         model_path (str): path to model file
-        model_type (str): type of model expected ["MDV5", "MDV6", "YOLO"]
+        model_type (str): type of model expected ["MDV5", "MDV6", "YOLO", "ONNX"]
         device (str): specify to run on cpu or gpu
 
     Returns:
@@ -36,7 +36,7 @@ def load_detector(model_path: str):
     if not Path(model_path).is_file():
         raise FileNotFoundError(f"Model file not found at {model_path}")
 
-    providers = get_device()
+    providers = get_onnx_device()
     model = ort.InferenceSession(model_path, providers=providers)
     model.model_type = "onnx"
     return model
@@ -88,7 +88,14 @@ def detect(detector,
         results = convert_onnx_detections(outputs, image_tensors, current_image_paths, image_sizes, letterbox)
         return results
 
-    # Full manifest, select file_col
+    # list of image filepaths
+    elif isinstance(image_file_names, list):
+        # create a data frame from list of image paths
+        manifest = pd.DataFrame(image_file_names, columns=[file_col])
+        # no frame column, assume all images and set to 0
+        manifest['frame'] = 0
+
+    # full manifest, select file_col
     elif isinstance(image_file_names, pd.DataFrame):
         if file_col not in image_file_names.columns:
             raise ValueError(f"file_col {file_col} not found in manifest columns")
@@ -98,6 +105,19 @@ def detect(detector,
             image_file_names['frame'] = 0
         # create a list of image paths
         manifest = image_file_names[[file_col, 'frame']]
+
+    # single row pd.Series, select file_col
+    elif isinstance(image_file_names, pd.Series):
+        if file_col not in image_file_names.index:
+            raise ValueError(f"file_col {file_col} not found in Series index")
+        if 'frame' not in image_file_names.index:
+            print("Warning: 'frame' column not found in Series index. Defaulting to 0 assuming images.")
+            image_file_names['frame'] = 0
+        # create a data frame from image_file_names
+        manifest = pd.DataFrame(image_file_names).T
+    # column from pd.DataFrame, expected input
+    else:
+        raise ValueError('image_file_names is not a recognized object')
 
     # load checkpoint
     if checkpoint_path and file_management.check_file(checkpoint_path, output_type="Megadetector raw output"):
@@ -285,31 +305,3 @@ def parse_detections(results: list,
         file_management.save_data(df, out_file)
 
     return df
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Train deep learning model.')
-
-    parser.add_argument('detector', help='Path to detector file')
-    parser.add_argument('manifest', help='Path to manifest file')
-    parser.add_argument('output_path', help='Path to output file')
-
-    parser.add_argument('--model_type', nargs='?', help='Path to detector file', default='MDv5')
-    parser.add_argument('--resize_width', nargs='?', help='Path to config file', default=MEGADETECTORv5_SIZE)
-    parser.add_argument('--resize_height', nargs='?', help='Path to config file', default=MEGADETECTORv5_SIZE)
-    parser.add_argument('--letterbox', nargs='?', help='Path to config file', default=True)
-    parser.add_argument('--confidence_threshold', nargs='?', help='Path to config file', default=0.1)
-    parser.add_argument('--file_col', nargs='?', help='Path to config file', default='frame')
-    parser.add_argument('--batch_size', nargs='?', help='Path to config file', default=4)
-    parser.add_argument('--num_workers', nargs='?', help='Path to config file', default=4)
-    parser.add_argument('--device', nargs='?', help='Path to config file', default=get_device())
-
-    args = parser.parse_args()
-
-    detector = load_detector(args.detector)
-    manifest = file_management.load_data(args.manifest)
-
-    mdresults = detect(detector, manifest, args.resize_width, args.resize_height, args.letterbox,
-                       confidence_threshold=args.confidence_threshold, file_col=args.file_col,
-                       batch_size=args.batch_size, num_workers=args.num_workers, device=args.device)
-    results = parse_detections(mdresults, manifest=manifest, out_file=args.output_path)

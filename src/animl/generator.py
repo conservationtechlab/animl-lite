@@ -122,6 +122,8 @@ class ManifestGenerator:
             raise ValueError("No bbox columns found for cropping")
         if crop_coord not in ['relative', 'absolute']:
             raise ValueError("crop_coord must be either 'relative' or 'absolute'")
+        if 'frame' not in self.x.columns:
+            self.x['frame'] = 0  # default frame 0 for images
 
         self.crop_coord = crop_coord
         self.resize_height = int(resize_height)

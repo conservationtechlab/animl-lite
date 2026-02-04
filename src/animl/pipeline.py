@@ -6,6 +6,7 @@ Automated Pipeline Functions
 import os
 import yaml
 import pandas as pd
+from pathlib import Path
 
 from animl import (classification, detection, export, file_management,
                    video_processing, split)
@@ -16,9 +17,10 @@ def from_paths(image_dir: str,
                detector_file: str,
                classifier_file: str,
                class_label: str = "class",
-               sort: bool = True,
+               sort: bool = False,
                visualize: bool = False,
-               sequence: bool = False) -> pd.DataFrame:
+               sequence: bool = False,
+               detect_only: bool = False) -> pd.DataFrame:
     """
     This function is the main method to invoke all the sub functions
     to create a working directory for the image directory.
@@ -65,6 +67,10 @@ def from_paths(image_dir: str,
         print("Converting MD JSON to dataframe and merging with manifest...")
         detections = detection.parse_detections(md_results, manifest=all_frames, out_file=working_dir.detections)
 
+    if detect_only:
+        print("Detection only flag set, skipping classification.")
+        return detections
+
     # Extract animal detections from the rest
     animals = split.get_animals(detections)
     empty = split.get_empty(detections)
@@ -87,7 +93,10 @@ def from_paths(image_dir: str,
                                                           maxdiff=60)
     else:
         print("Classifying individual frames...")
-        manifest = classification.single_classification(animals, empty, predictions_raw, class_list[class_label])
+        manifest = classification.single_classification(animals, empty, 
+                                                        predictions_raw, 
+                                                        class_list[class_label],
+                                                        best=True)
 
     if sort:
         print("Sorting...")
@@ -116,12 +125,12 @@ def from_config(config: str):
     Returns:
         pandas.DataFrame: Concatenated dataframe of animal and empty detections
     """
-
     print(f'Using config "{config}"')
     cfg = yaml.safe_load(open(config, 'r'))
 
     # get image dir and cuda defaults
     image_dir = cfg['image_dir']
+    device = cfg.get('device', 'cpu')
 
     print("Searching directory...")
     # Create a working directory, default to image_dir
@@ -182,12 +191,16 @@ def from_config(config: str):
                                                           file_col=cfg.get('file_col_classification', 'frame'),
                                                           maxdiff=60)
     else:
-        manifest = classification.single_classification(animals, empty, predictions_raw, class_list[cfg.get('class_label_col', 'class')])
+        manifest = classification.single_classification(animals, empty, 
+                                                        predictions_raw, 
+                                                        class_list[cfg.get('class_label_col', 'class')],
+                                                        file_col=cfg.get('file_col_classification', 'filepath'),
+                                                        best=cfg.get('best_only', True))
 
     if cfg.get('sort', True):
         print("Sorting...")
         working_dir.activate_linkdir()
-        manifest = export.export_folders(manifest, working_dir.linkdir)
+        manifest = export.export_folders(manifest, working_dir.linkdir, copy=cfg.get('copy', False))
 
     # Plot boxes
     if cfg.get('visualize', False):

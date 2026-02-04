@@ -31,7 +31,7 @@ def extract_frames(files,
         frames (int): Number of frames to sample from each video (default is 5).
         fps (Optional[int]): Frames per second to sample from each video. If specified, overrides frames.
         out_file (Optional[str]): Path to save the extracted frames manifest as a CSV file.
-        save (bool): Whether to save the extracted frames manifest to out_file (default is False).
+        out_dir (str): Directory to save extracted frame images. If None, frames are not saved as images.
         file_col (str): Column name in the DataFrame that contains the file paths (default is "filepath").
         parallel (bool): Whether to use multiprocessing for frame extraction (default is True).
         num_workers (int): Number of worker processes to use for parallel processing (default is min(8, max(1, os.cpu_count() - 1))).
@@ -135,7 +135,7 @@ def count_frames(filepath, frames=5, fps=None) -> int:
             if duration > 0:
                 video_fps = frame_count / duration
             else:
-                print("Could not determine video FPS, defaulting to set number of frames")
+                print(f"Could not determine video FPS, defaulting to {frames} frames uniformly sampled.")
                 increment = int(frame_count / frames)
                 while len(frames_saved) < frames:
                     frames_saved.append([str(filepath), frame_capture])

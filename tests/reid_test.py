@@ -4,7 +4,7 @@ from pathlib import Path
 import animl
 
 
-@unittest.skip
+# @unittest.skip
 def reid_test():
     manifest_path = Path.cwd() / 'examples' / 'Jaguar'
     miew_path = Path.cwd() / 'models/miewid_v3.onnx'
