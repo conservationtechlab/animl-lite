@@ -1,4 +1,4 @@
-# animl-py 3.2.0
+# animl-py 3.2.1
 AniML comprises a variety of machine learning tools for analyzing ecological data. This Python package includes a set of functions to classify subjects within camera trap field data and can handle both images and videos. 
 This package is also available in R: [animl](https://github.com/conservationtechlab/animl)
 
@@ -29,14 +29,13 @@ pip install animl
 We recommend running AniML on GPU-enabled hardware.
 **If using an NVIDIA GPU, ensure driviers, cuda-toolkit and cudnn are installed.
 
-**Python** >= 3.12
+**Python** >= 3.12 <3.14
 
 **Onnx** <br>
-Animl currently depends on onnxruntime-gpu >= 1.23.2.
+Animl currently depends on onnxruntime-gpu == 1.20.0.
 
 Python Package Dependencies
 * numpy>=2.0.2
-* onnxruntime-gpu>=1.23.2
 * pandas>=2.2.2,<3.0.0
 * pillow>=11.0.0
 * opencv-python>=4.12.0.88

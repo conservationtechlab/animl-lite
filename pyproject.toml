@@ -1,6 +1,6 @@
 [project]
 name = "animl-lite"  
-version = "3.2.0"
+version = "3.2.1"
 description = "Tools for classifying camera trap images"  
 
 readme = "README.md" 
@@ -9,15 +9,18 @@ keywords = ["camera trap", "ecology", "conservation", "zoo", "SDZWA", "conservat
 
 authors = [{name = "Kyra Swanson", email = "tswanson@sdzwa.org" }]
 
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "numpy>=2.0.2", 
-    "onnxruntime-gpu>=1.23.2", 
     "pandas>=2.2.2,<3.0.0", 
     "pillow>=11.0.0", 
     "pyyaml>=6.0.3",
     "opencv-python>=4.12.0.88", 
     "tqdm>=4.66.5",
+]
+[project.optional-dependencies]
+gpu = [
+    "onnxruntime-gpu==1.20.0", 
 ]
 
 [project.urls]  # Optional
