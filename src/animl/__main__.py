@@ -33,13 +33,10 @@ parser.add_argument('imagedir_config', type=str,
                     help='Path to Image Directory or Config File')
 parser.add_argument('--detector', type=str, nargs='?',
                     help='Path to MD model',
-                    default=Path(home / 'md_v5a.0.0.pt'))
+                    default=Path(home / 'md_v1000.0.0-sorrel.onnx'))
 parser.add_argument('--classifier', type=str, nargs='?',
                     help='Path to Class model',
-                    default=Path(home / 'sdzwa_southwest_v3.pt'))
-parser.add_argument('--classlist', type=str, nargs='?',
-                    help='Path to class list',
-                    default=None)
+                    default=Path(home / 'sdzwa_southwest_v3.onnx'))
 parser.add_argument('--detect_only', '-d', action='store_true',
                     help='Run detection only, skip classification')
 parser.add_argument('--sort', '-s', action='store_true',
@@ -60,11 +57,8 @@ else:
     if not Path(args.classifier).is_file():
         raise FileNotFoundError("Classifier not found, must be a .onnx file.")
 
-    if not Path(args.classlist).is_file():
-        raise FileNotFoundError("Class list not found, must be a .csv file.")
-
     # Call the main function
-    pipeline.from_paths(args.imagedir_config, args.detector, args.classifier, args.classlist,
+    pipeline.from_paths(args.imagedir_config, args.detector, args.classifier,
                         sort=args.sort, visualize=args.visualize, detect_only=args.detect_only)
 
 print(f"Pipeline took {time.time() - start_time:.2f} seconds")
