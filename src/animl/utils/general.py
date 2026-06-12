@@ -6,6 +6,12 @@ import numpy as np
 import onnxruntime as ort
 
 
+MEGADETECTORv5_SIZE = 1280
+SDZWA_CLASSIFIER_SIZE = 299
+
+MODEL_TYPES = {"megadetector", "yolo", "miewid", "classifier"}
+
+
 def _softmax(x):
     '''
     Helper function to softmax
@@ -18,6 +24,7 @@ def get_onnx_device(user_set=None, quiet=False):
     Get gpu if available
     """
     providers = ort.get_available_providers()
+    
     if 'CUDAExecutionProvider' in providers:
         # user selects cuda device and is available
         if user_set == 'cpu':
@@ -43,7 +50,7 @@ def get_onnx_device(user_set=None, quiet=False):
 
     # cuda not available
     else:
-        if user_set is not None and user_set in {'cuda', 'cuda:0', 'cuda:1', 'cuda:2', 'cuda:3'}:
+        if user_set is not None and user_set in ['cuda', 'cuda:0', 'cuda:1', 'cuda:2', 'cuda:3']:
             if not quiet:
                 print('Warning: CUDA device specified but not available, using CPU instead.')
             providers = ['CPUExecutionProvider']

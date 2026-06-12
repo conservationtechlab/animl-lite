@@ -5,6 +5,7 @@ Functions for loading MegaDetector, as well as custom YOLO models
 parse_detections() converts json output into a dataframe
 
 """
+from shutil import copyfile
 from typing import Optional
 import time
 from animl.utils.visualization import MD_LABELS
@@ -18,11 +19,6 @@ from animl import file_management
 from animl.generator import manifest_dataloader
 from animl.utils.general import _normalize_boxes, _xyxy2xywh, _scale_letterbox, get_onnx_device
 from animl.utils.visualization import MD_LABELS
-
-MEGADETECTORv5_SIZE = 1280
-
-MODEL_TYPES = {"megadetector", "yolo", "miewid", "classifier"}
-SDZWA_CLASSIFIER_SIZE = 480
 
 
 def load_detector(model_path: str, model_type: str = "megadetector", device: Optional[str] = None):
@@ -90,7 +86,7 @@ def detect(detector,
                                                     resize_height=resize_height)
 
         input_name = detector.get_inputs()[0].name
-        outputs = detector.run(None, {input_name: batch_from_dataloader[0].cpu().numpy()})[0]
+        outputs = detector.run(None, {input_name: batch_from_dataloader[0]})[0]
         results = _convert_detections(outputs,
                                       batch_from_dataloader,
                                       letterbox,
@@ -138,7 +134,7 @@ def detect(detector,
 
         # ONNX Runtime inference
         input_name = detector.get_inputs()[0].name
-        outputs = detector.run(None, {input_name: batch[0].cpu().numpy()})[0]
+        outputs = detector.run(None, {input_name: batch[0]})[0]
         outputs = _convert_detections(outputs,
                                       batch,
                                       letterbox,
@@ -151,11 +147,11 @@ def detect(detector,
         # Write a checkpoint if necessary
         if checkpoint_frequency != -1 and count % checkpoint_frequency == 0:
             print('Writing a new checkpoint after having processed {} images since last restart'.format(count))
-            file_management.save_detection_checkpoint(checkpoint_path, results)
+            _save_detection_checkpoint(checkpoint_path, results)
 
     print(f"\nFinished detection. Total images processed: {len(results)} at {round(len(results)/(time.time() - start_time), 1)} img/s.")
     if checkpoint_path:
-        file_management.save_detection_checkpoint(checkpoint_path, results)
+        _save_detection_checkpoint(checkpoint_path, results)
 
     return results
 
@@ -320,6 +316,31 @@ def parse_detections(detections: list[dict],
         file_management.save_data(df, out_file)
 
     return df
+
+
+def _save_detection_checkpoint(checkpoint_path: str, results: dict) -> None:
+    """
+    Save a checkpoint of the detection results to a JSON file.
+
+    Args:
+        checkpoint_path (str): the path to the checkpoint file
+        results (list): a list of detection results to save
+    """
+    assert checkpoint_path is not None
+    # Back up any previous checkpoints, to protect against crashes while we're writing
+    # the checkpoint file.
+    checkpoint_tmp_path = None
+    if Path(checkpoint_path).is_file():
+        checkpoint_tmp_path = str(checkpoint_path) + '_tmp'
+        copyfile(checkpoint_path, checkpoint_tmp_path)
+
+    # Write the new checkpoint
+    file_management.save_json({'images': results}, checkpoint_path, prompt=False)
+
+    # Remove the backup checkpoint if it exists
+    if checkpoint_tmp_path is not None:
+        Path(checkpoint_tmp_path).unlink()
+
 
 
 def get_animals(manifest: pd.DataFrame):

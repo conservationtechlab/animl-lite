@@ -8,7 +8,7 @@ from pathlib import Path
 
 from animl import (classification, detection, export, file_management, video_processing)
 from animl.utils import visualization
-from animl.utils.general import NUM_THREADS
+from animl.utils.general import MEGADETECTORv5_SIZE, SDZWA_CLASSIFIER_SIZE, get_onnx_device
 
 
 def from_paths(image_dir: str,
@@ -48,15 +48,17 @@ def from_paths(image_dir: str,
     all_frames = video_processing.extract_frames(files, frames=5, out_file=working_dir.imageframes)
 
     print("Running images and video frames through detector...")
+    device = get_onnx_device(user_set=None)
+
     if (file_management.check_file(working_dir.detections, output_type="Detections")):
         detections = file_management.load_data(working_dir.detections)
     else:
-        detector = detection.load_detector(detector_file, "megadetector", device=None)
+        detector = detection.load_detector(detector_file, "megadetector", device=device)
 
         md_results = detection.detect(detector,
                                       all_frames,
-                                      resize_height=detection.MEGADETECTORv5_SIZE,
-                                      resize_width=detection.MEGADETECTORv5_SIZE,
+                                      resize_height=MEGADETECTORv5_SIZE,
+                                      resize_width=MEGADETECTORv5_SIZE,
                                       checkpoint_path=working_dir.mdraw,
                                       checkpoint_frequency=1000)
         # Convert MD JSON to pandas dataframe, merge with manifest
@@ -89,8 +91,8 @@ def from_paths(image_dir: str,
         classifier, class_list = classification.load_classifier(classifier_file)
         predictions_output = classification.classify(classifier,
                                                      animals,
-                                                     resize_height=classification.SDZWA_CLASSIFIER_SIZE,
-                                                     resize_width=classification.SDZWA_CLASSIFIER_SIZE,
+                                                     resize_height=SDZWA_CLASSIFIER_SIZE,
+                                                     resize_width=SDZWA_CLASSIFIER_SIZE,
                                                      out_file=working_dir.predictions)
         if sequence:
             print("Classifying sequences...")
@@ -164,10 +166,14 @@ def from_config(config: str):
                                                  out_file=working_dir.imageframes)
 
     print("Running images and video frames through detector...")
+    device = get_onnx_device(user_set=None)
+
     if (file_management.check_file(working_dir.detections, output_type="Detections")):
         detections = file_management.load_data(working_dir.detections)
     else:
-        detector = detection.load_detector(cfg['detector_file'], model_type=cfg.get('detector_type', 'megadetector'))
+
+
+        detector = detection.load_detector(cfg['detector_file'], model_type=cfg.get('detector_type', 'megadetector'), device=device)
         categories = cfg.get('detector_class_list', None)
         if categories is None:
             category_map = visualization.MD_LABELS
@@ -179,10 +185,8 @@ def from_config(config: str):
 
         md_results = detection.detect(detector,
                                       all_frames,
-                                      resize_height=cfg.get('detection_resize_height',
-                                                            detection.MEGADETECTORv5_SIZE),
-                                      resize_width=cfg.get('detection_resize_width',
-                                                           detection.MEGADETECTORv5_SIZE),
+                                      resize_height=cfg.get('detection_resize_height', MEGADETECTORv5_SIZE),
+                                      resize_width=cfg.get('detection_resize_width', MEGADETECTORv5_SIZE),
                                       letterbox=cfg.get('letterbox', True),
                                       category_map=category_map,
                                       file_col=cfg.get('detection_file_col', 'filepath'),
@@ -226,9 +230,9 @@ def from_config(config: str):
         predictions_output = classification.classify(classifier,
                                                      animals,
                                                      resize_height=cfg.get('classification_resize_height',
-                                                                           classification.SDZWA_CLASSIFIER_SIZE),
+                                                                           SDZWA_CLASSIFIER_SIZE),
                                                      resize_width=cfg.get('classification_resize_width',
-                                                                          classification.SDZWA_CLASSIFIER_SIZE),
+                                                                          SDZWA_CLASSIFIER_SIZE),
                                                      file_col=cfg.get('classification_file_col', 'filepath'),
                                                      out_file=working_dir.predictions)
 
