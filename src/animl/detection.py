@@ -16,7 +16,7 @@ import onnxruntime as ort
 
 from animl import file_management
 from animl.generator import manifest_dataloader
-from animl.utils.general import _normalize_boxes, _xyxy2xywh, _normalize_boxes, _xyxy2xywh, _scale_letterbox, get_onnx_device
+from animl.utils.general import _normalize_boxes, _xyxy2xywh, _scale_letterbox, get_onnx_device
 from animl.utils.visualization import MD_LABELS
 
 MEGADETECTORv5_SIZE = 1280
