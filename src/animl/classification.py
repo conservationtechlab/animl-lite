@@ -42,7 +42,7 @@ def load_classifier(model_path: str,
 
     print(f'Loading model at {model_path}')
     model = onnxruntime.InferenceSession(model_path, providers=providers)
-    model.framework = "onnx"
+    model.model_type = "classifier"
 
     # get number of classes
     if isinstance(classes, str) or isinstance(classes, Path):

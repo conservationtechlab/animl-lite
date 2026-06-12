@@ -21,7 +21,7 @@ from animl.utils.visualization import MD_LABELS
 
 MEGADETECTORv5_SIZE = 1280
 
-MD_MODELS = {"megadetector", "yolo"}
+MODEL_TYPES = {"megadetector", "yolo", "miewid", "classifier"}
 SDZWA_CLASSIFIER_SIZE = 480
 
 
@@ -31,7 +31,7 @@ def load_detector(model_path: str, model_type: str = "megadetector", device: Opt
 
     Args:
         model_path (str): path to model file
-        model_type (str): type of model expected ["megadetector", "yolo"]
+        model_type (str): type of model expected ["megadetector", "yolo", "miewid"]
         device (str): specify to run on cpu or gpu
 
     Returns:
@@ -198,7 +198,7 @@ def _convert_detections(predictions: list,
                     'frame': int(image_frames[i]),
                     'max_detection_conf': max_detection_conf,
                     # for MD models, set category to 0 (empty) if no detections, for other models set to None
-                    'category': 0 if model_type in MD_MODELS else None,
+                    'category': 0 if model_type == "megadetector" else None,
                     'category_label': 'empty',
                     'detections': []}
             results.append(data)
@@ -219,7 +219,7 @@ def _convert_detections(predictions: list,
                     bbox = _scale_letterbox(bbox, image_tensors[i].shape[1:], image_sizes[i, :])
 
                 # increase md categories by 1
-                if model_type in MD_MODELS:
+                if model_type == "megadetector":
                     category[j] += 1
 
                 # build detection dict
