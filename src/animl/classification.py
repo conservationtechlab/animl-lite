@@ -13,7 +13,7 @@ from tqdm import tqdm
 import onnxruntime
 
 from animl import generator, file_management
-from animl.utils.general import get_onnx_device, softmax
+from animl.utils.general import get_onnx_device, _softmax
 
 
 SDZWA_CLASSIFIER_SIZE = 299
@@ -140,7 +140,7 @@ def classify(model,
     for _, batch in tqdm(enumerate(dataset), total=len(detections)):
         image = batch[0]
         output = model.run(None, {model.get_inputs()[0].name: image})[0]
-        raw_output.extend(softmax(output))
+        raw_output.extend(_softmax(output))
 
     raw_output = np.vstack(raw_output)
 

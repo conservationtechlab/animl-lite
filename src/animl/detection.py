@@ -5,7 +5,6 @@ Functions for loading MegaDetector, as well as custom YOLO models
 parse_detections() converts json output into a dataframe
 
 """
-import argparse
 from typing import Optional
 import time
 import numpy as np
@@ -85,7 +84,7 @@ def detect(detector,
 
         input_name = detector.get_inputs()[0].name
         outputs = detector.run(None, {input_name: image_tensors.cpu().numpy()})[0]
-        results = convert_onnx_detections(outputs, image_tensors, current_image_paths, image_sizes, letterbox)
+        results = _convert_onnx_detections(outputs, image_tensors, current_image_paths, image_sizes, letterbox)
         return results
 
     # Full manifest, select file_col
@@ -133,7 +132,7 @@ def detect(detector,
         # ONNX Runtime inference
         input_name = detector.get_inputs()[0].name
         outputs = detector.run(None, {input_name: image_tensors})[0]
-        outputs = convert_onnx_detections(outputs, confidence_threshold,
+        outputs = _convert_onnx_detections(outputs, confidence_threshold,
                                           image_tensors, current_image_paths, current_frames, current_sizes, letterbox)
         # Process outputs to match expected format
         results.extend(outputs)
@@ -150,7 +149,7 @@ def detect(detector,
     return results
 
 
-def convert_onnx_detections(predictions: list,
+def _convert_onnx_detections(predictions: list,
                             confidence_threshold: float,
                             image_tensors: list,
                             image_paths: list,

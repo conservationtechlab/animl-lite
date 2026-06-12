@@ -7,14 +7,14 @@ import numpy as np
 import onnxruntime as ort
 
 
-def softmax(x):
+def _softmax(x):
     '''
     Helper function to softmax
     '''
     return np.exp(x)/np.sum(np.exp(x), axis=1, keepdims=True)
 
 
-def tensor_to_onnx(tensor, channel_last=False):
+def _tensor_to_onnx(tensor, channel_last=False):
     '''
     Helper function for onnx, shifts dims to BxHxWxC
     '''
@@ -66,7 +66,7 @@ def get_onnx_device(user_set=None, quiet=False):
 # ==============================================================================
 # COORDINATE CONVERSION
 # ==============================================================================
-def xyxyc2xywh(x):
+def _xyxyc2xywh(x):
     # Convert nx4 boxes from [x1, y1, x2, y2] to [x, y, w, h] where xy1=top-left, xy2=bottom-right
     y = np.copy(x)
     y[:, 0] = (x[:, 0] + x[:, 2]) / 2  # x center
@@ -76,7 +76,7 @@ def xyxyc2xywh(x):
     return y
 
 
-def xywhc2xyxy(x):
+def _xywhc2xyxy(x):
     # Convert nx4 boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
     y = np.copy(x)
     y[:, 0] = x[:, 0] - x[:, 2] / 2  # top left x
@@ -86,7 +86,7 @@ def xywhc2xyxy(x):
     return y
 
 
-def xywhn2xyxy(x, w=640, h=640, padw=0, padh=0):
+def _xywhn2xyxy(x, w=640, h=640, padw=0, padh=0):
     # Convert nx4 boxes from [x, y, w, h] normalized to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
     y = np.copy(x)
     y[:, 0] = w * (x[:, 0] - x[:, 2] / 2) + padw  # top left x
@@ -96,10 +96,10 @@ def xywhn2xyxy(x, w=640, h=640, padw=0, padh=0):
     return y
 
 
-def xyxyc2xywhn(x, w=640, h=640, clip=False, eps=0.0):
+def _xyxyc2xywhn(x, w=640, h=640, clip=False, eps=0.0):
     # Convert nx4 boxes from [x1, y1, x2, y2] to [x, y, w, h] normalized where xy1=top-left, xy2=bottom-right
     if clip:
-        clip_coords(x, (h - eps, w - eps))  # warning: inplace clip
+        _clip_coords(x, (h - eps, w - eps))  # warning: inplace clip
     y = np.copy(x)
     y[:, 0] = ((x[:, 0] + x[:, 2]) / 2) / w  # x center
     y[:, 1] = ((x[:, 1] + x[:, 3]) / 2) / h  # y center
@@ -108,7 +108,7 @@ def xyxyc2xywhn(x, w=640, h=640, clip=False, eps=0.0):
     return y
 
 
-def xyn2xy(x, w=640, h=640, padw=0, padh=0):
+def _xyn2xy(x, w=640, h=640, padw=0, padh=0):
     # Convert normalized segments into pixel segments, shape (n,2)
     y = np.copy(x)
     y[:, 0] = w * x[:, 0] + padw  # top left x
@@ -116,7 +116,7 @@ def xyn2xy(x, w=640, h=640, padw=0, padh=0):
     return y
 
 
-def xywh2xyxy(bbox):
+def _xywh2xyxy(bbox):
     """
     Converts bounding boxes from xywh to xyxy format.
 
@@ -132,7 +132,7 @@ def xywh2xyxy(bbox):
     return y
 
 # THIS ONE
-def xyxy2xywh(bbox):
+def _xyxy2xywh(bbox):
     """
     Converts bounding boxes from xywh to xyxy format.
 
@@ -149,7 +149,7 @@ def xyxy2xywh(bbox):
     return y
 
 
-def convert_minxywh_to_absxyxy(bbox, width, height):
+def _convert_minxywh_to_absxyxy(bbox, width, height):
     """
     Converts bounding box from [x_min, y_min, width, height] to [x1, y1, x2, y2] format.
 
@@ -171,13 +171,13 @@ def convert_minxywh_to_absxyxy(bbox, width, height):
 
 
 
-def clip_coords(boxes, shape):
+def _clip_coords(boxes, shape):
     # Clip bounding xyxy bounding boxes to image shape (height, width)
     boxes[:, [0, 2]] = boxes[:, [0, 2]].clip(0, shape[1])  # x1, x2
     boxes[:, [1, 3]] = boxes[:, [1, 3]].clip(0, shape[0])  # y1, y2
 
 
-def normalize_boxes(bbox, image_sizes):
+def _normalize_boxes(bbox, image_sizes):
     """
     Converts absolute bounding box coordinates to relative coordinates.
 
@@ -199,7 +199,7 @@ def normalize_boxes(bbox, image_sizes):
 # Augmentations
 # ==============================================================================
 
-def letterbox(im: np.ndarray, new_shape = (640, 640),
+def _letterbox(im: np.ndarray, new_shape = (640, 640),
               color = (114, 114, 114),
               auto: bool = True,
               scaleFill: bool = False,
@@ -237,7 +237,7 @@ def letterbox(im: np.ndarray, new_shape = (640, 640),
     return im, ratio, (dw, dh)
 
 
-def scale_letterbox(bbox, resized_shape, original_shape):
+def _scale_letterbox(bbox, resized_shape, original_shape):
     """
     Converts bounding box coordinates from a resized, letterboxed image space
     back to the original image's coordinate space. Assumes input coordinates
@@ -259,7 +259,7 @@ def scale_letterbox(bbox, resized_shape, original_shape):
                     format.
     """
     # Convert input xywh (top-left corner) to xyxy
-    xyxy_coords = xywh2xyxy(bbox)
+    xyxy_coords = _xywh2xyxy(bbox)
 
     # Calculate the scaling ratio and padding
     ratio = min(resized_shape[0] / original_shape[0], resized_shape[1] / original_shape[1])
@@ -280,6 +280,6 @@ def scale_letterbox(bbox, resized_shape, original_shape):
     xyxy_coords[[1, 3]] = np.clip(xyxy_coords[[1, 3]], 0, 1) 
 
     # Convert final xyxy to xywh (top-left corner)
-    xywh_coords = xyxy2xywh(xyxy_coords)
+    xywh_coords = _xyxy2xywh(xyxy_coords)
 
     return xywh_coords
