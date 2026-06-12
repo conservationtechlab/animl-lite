@@ -10,13 +10,11 @@ from animl import reid
 from animl import utils
 from animl import video_processing
 
-from animl.classification import (SDZWA_CLASSIFIER_SIZE, classify,
-                                  load_class_list, load_classifier,
+from animl.classification import (classify, load_class_list, load_classifier,
                                   sequence_classification,
                                   single_classification,)
-from animl.detection import (MEGADETECTORv5_SIZE, MODEL_TYPES,
-                             SDZWA_CLASSIFIER_SIZE, detect, get_animals,
-                             get_empty, load_detector, parse_detections,)
+from animl.detection import (detect, get_animals, get_empty, load_detector,
+                             parse_detections,)
 from animl.export import (export_camptrapdp, export_camtrapR, export_coco,
                           export_folders, export_megadetector,
                           export_timelapse, export_yolo, remove_link,
@@ -33,10 +31,11 @@ from animl.reid import (compute_batched_distance_matrix,
                         compute_distance_matrix, cosine_distance, distance,
                         euclidean_squared_distance, extract_miew_embeddings,
                         inference, load_miew, remove_diagonal,)
-from animl.utils import (MD_COLORS, MD_LABELS, animlr, check_exiftool,
-                         check_onnx_cuda, general, get_onnx_device,
-                         get_version, plot_all_bounding_boxes, plot_box,
-                         plot_from_file, visualization,)
+from animl.utils import (MD_COLORS, MD_LABELS, MEGADETECTORv5_SIZE,
+                         MODEL_TYPES, SDZWA_CLASSIFIER_SIZE, animlr,
+                         check_exiftool, check_onnx_cuda, general,
+                         get_onnx_device, get_version, plot_all_bounding_boxes,
+                         plot_box, plot_from_file, visualization,)
 from animl.video_processing import (extract_frames, get_frame_as_image,)
 
 __all__ = ['IMAGE_EXTENSIONS', 'MD_COLORS', 'MD_LABELS', 'MEGADETECTORv5_SIZE',

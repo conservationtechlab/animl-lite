@@ -16,7 +16,7 @@ from pathlib import Path
 from PIL import Image, ImageFile, ImageOps
 
 from animl.file_management import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
-from animl.classification import SDZWA_CLASSIFIER_SIZE
+from animl.utils.general import SDZWA_CLASSIFIER_SIZE
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 

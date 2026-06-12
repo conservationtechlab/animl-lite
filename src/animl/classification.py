@@ -16,9 +16,6 @@ from animl import generator, file_management
 from animl.utils.general import get_onnx_device, _softmax
 
 
-SDZWA_CLASSIFIER_SIZE = 299
-
-
 def load_classifier(model_path: str,
                     classes: Union[int, str, Path, pd.DataFrame] = None,
                     device: Optional[str] = None):
@@ -80,8 +77,8 @@ def load_class_list(classlist_file):
 
 def classify(model,
              detections,
-             resize_width: int = 480,
-             resize_height: int = 480,
+             resize_width: int = generator.SDZWA_CLASSIFIER_SIZE,
+             resize_height: int = generator.SDZWA_CLASSIFIER_SIZE,
              file_col: str = 'filepath',
              crop: bool = True,
              normalize: bool = True,
@@ -154,45 +151,89 @@ def classify(model,
 
 def single_classification(animals: pd.DataFrame,
                           empty: Optional[pd.DataFrame],
-                          predictions_raw: np.array,
-                          class_list: pd.DataFrame):
+                          predictions_output: Union[np.array, tuple],
+                          class_list: Union[list, pd.Series],
+                          best: bool = False,
+                          count: bool = False,
+                          file_col: str = "filepath",
+                          failed_files: Optional[list] = None):
     """
     Get maximum likelihood prediction from softmaxed logits.
 
     Args:
         animals (pd.DataFrame): animal detections from manifest
-        predictions_raw (np.array): softmaxed logits from classify()
-        class_list (pd.DataFrame): class list associated with model
+        empty (Optional[pd.DataFrame]): empty detections from manifest
+        predictions_output (Union[np.array, tuple]): softmaxed logits from classify()
+            and optionally list of failed files from classify
+        class_list (Union[list, pd.Series]): class list associated with model
+        best (bool): whether to return one prediction per file
+        count (bool): whether to add a count column with number of detections of each species per file
+        file_col (str): column name for file paths in the dataframe
+        failed_files (Optional[list]): list of files that failed to load during classification
 
     Returns:
         animals dataframe with "prediction" label an "confidence" columns
     """
-    class_list = pd.Series(class_list)
+    # convert None to empty dataframe fo concat
+    if empty is None:
+        empty = pd.DataFrame()
+    else:
+        empty = empty.reset_index(drop=True)
+        empty['prediction'] = empty['category_label']
+        empty['confidence'] = empty['conf']
+        empty['confidence'] = empty['confidence'].replace(np.nan, 1)
+
+    if isinstance(class_list, pd.Series):
+        class_list = class_list.to_list()
+
+    # handle tuple output from classify (predictions, failed_files)
+    if isinstance(predictions_output, (list, tuple)) and len(predictions_output) == 2:
+        predictions_raw, failed_files = predictions_output
+    else:
+        predictions_raw, failed_files = predictions_output, failed_files
 
     if not animals.empty:
-        files = animals.groupby('filepath')
-        updated_files = []
-        for f, file in files:
-            preds = predictions_raw[file.index]
-            preds = np.mean(preds, axis=0)
-            file["prediction"] = class_list[np.argmax(preds)]
-            file["confidence"] = np.max(file["conf"]) * np.max(preds)
-            updated_files.append(file)
-
-        animals = pd.concat(updated_files, ignore_index=True)
+        if failed_files is not None and len(failed_files) > 0:
+            print(f"Warning: {len(failed_files)} files failed to load during classification",
+                  " and will be excluded from results.")
+            animals = animals[~animals[file_col].isin(failed_files)]
+        animals = animals.reset_index(drop=True)
+        animals["prediction"] = [class_list[i] for i in np.argmax(predictions_raw, axis=1)]
+        animals["confidence"] = animals["conf"].mul(np.max(predictions_raw, axis=1))
 
     manifest = pd.concat([animals if not animals.empty else None, empty if not empty.empty else None]).reset_index(drop=True)
 
+    # add extension column if not present for video handling
+    if 'extension' not in manifest.columns:
+        manifest['extension'] = manifest[file_col].apply(lambda x: Path(x).suffix.lower())
+
     # remove empties from videos
-    files = manifest.groupby('filepath')
+    files = manifest.groupby(file_col)
+
     for f, file in files:
         if file['extension'].iloc[0] in file_management.VIDEO_EXTENSIONS:
             predictions = file['prediction'].unique()
             if 'empty' in predictions and len(predictions) > 1:
-                real_prediction = predictions[predictions != 'empty'][0]
-                manifest.loc[manifest['filepath'] == f, 'prediction'] = real_prediction
+                file = file[file['prediction'] != 'empty']
+                # replace empty predictions with most confident non-empty prediction
+                top = file.sort_values("confidence", ascending=False).iloc[0]
+                cols = ['prediction', 'confidence', 'frame', 'conf', 'max_detection_conf',
+                        'category', 'category_label', 'bbox_x', 'bbox_y', 'bbox_w', 'bbox_h']
+                mask = manifest[file_col] == f
+                manifest.loc[mask, cols] = top[cols].values
 
-    return manifest
+        # get counts of each prediction for the file if count = True
+        if count:
+            file['count'] = file['prediction'].map(file['prediction'].value_counts())
+            manifest.loc[manifest[file_col] == f, 'count'] = file['count'].values
+
+    # best guess
+    if best:
+        # take most confident guess
+        manifest = manifest.sort_values("confidence", ascending=False)
+        manifest = manifest.drop_duplicates(subset=file_col, keep="first")
+
+    return manifest.reset_index(drop=True)
 
 
 def sequence_classification(animals: pd.DataFrame,
