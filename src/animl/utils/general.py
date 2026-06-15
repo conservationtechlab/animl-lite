@@ -12,7 +12,7 @@ SDZWA_CLASSIFIER_SIZE = 299
 MODEL_TYPES = {"megadetector", "yolo", "miewid", "classifier"}
 
 
-def _softmax(x):
+def softmax(x):
     '''
     Helper function to softmax
     '''

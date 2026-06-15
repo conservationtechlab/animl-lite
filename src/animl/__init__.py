@@ -35,7 +35,7 @@ from animl.utils import (MD_COLORS, MD_LABELS, MEGADETECTORv5_SIZE,
                          MODEL_TYPES, SDZWA_CLASSIFIER_SIZE, animlr,
                          check_exiftool, check_onnx_cuda, general,
                          get_onnx_device, get_version, plot_all_bounding_boxes,
-                         plot_box, plot_from_file, visualization,)
+                         plot_box, plot_from_file, softmax, visualization,)
 from animl.video_processing import (extract_frames, get_frame_as_image,)
 
 __all__ = ['IMAGE_EXTENSIONS', 'MD_COLORS', 'MD_LABELS', 'MEGADETECTORv5_SIZE',
@@ -57,5 +57,5 @@ __all__ = ['IMAGE_EXTENSIONS', 'MD_COLORS', 'MD_LABELS', 'MEGADETECTORv5_SIZE',
            'pipeline', 'plot_all_bounding_boxes', 'plot_box', 'plot_from_file',
            'reid', 'remove_diagonal', 'remove_link', 'save_data', 'save_json',
            'save_yaml', 'sequence_calculation', 'sequence_classification',
-           'single_classification', 'update_labels_from_folders', 'utils',
-           'video_processing', 'visualization']
+           'single_classification', 'softmax', 'update_labels_from_folders',
+           'utils', 'video_processing', 'visualization']
