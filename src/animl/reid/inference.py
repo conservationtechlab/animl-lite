@@ -30,7 +30,9 @@ def load_miew(file_path: str,
         loaded miewid model object
     """
     device = get_onnx_device(user_set=device)
+    print(f'Sending model to {device}')
     miew = ort.InferenceSession(file_path, providers=device)
+    miew.model_type = 'miewid'
     return miew
 
 

@@ -10,91 +10,15 @@ values scaled to [0, 1]. Batching is provided by a simple Python generator.
 """
 import cv2
 import numpy as np
-from typing import Tuple, List, Optional, Iterable, Sequence
+from typing import Tuple, Optional, Sequence
 import pandas as pd
 from pathlib import Path
 from PIL import Image, ImageFile, ImageOps
 
 from animl.file_management import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+from animl.utils.general import SDZWA_CLASSIFIER_SIZE
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-
-
-def Letterbox(resize_height: int,
-              resize_width: int,
-              image: Image.Image) -> Image.Image:
-    # PIL image size: (width, height)
-    width, height = image.size
-    target_w, target_h = resize_width, resize_height
-
-    # If aspect ratios are already the same (rounded to 2 decimals), just resize
-    if round((width / height), 2) == round((target_w / target_h), 2):
-        return image.resize((target_w, target_h), Image.BILINEAR)
-
-    # Compute required padding to achieve target aspect ratio, do center pad
-    target_ar = target_w / target_h
-    src_ar = width / height
-
-    if src_ar < target_ar:
-        # source narrower -> pad left/right
-        new_width = int(target_ar * height)
-        pad_total = max(0, new_width - width)
-        pad_left = pad_total // 2
-        pad_right = pad_total - pad_left
-        padded = ImageOps.expand(image, border=(pad_left, 0, pad_right, 0), fill=0)
-    else:
-        # source wider -> pad top/bottom
-        new_height = int(width / target_ar)
-        pad_total = max(0, new_height - height)
-        pad_top = pad_total // 2
-        pad_bottom = pad_total - pad_top
-        padded = ImageOps.expand(image, border=(0, pad_top, 0, pad_bottom), fill=0)
-
-    return padded.resize((target_w, target_h), Image.BILINEAR)
-
-
-def Normalize(img: np.ndarray,
-              mean: Sequence[float],
-              std: Sequence[float],
-              channel_axis: int = 0,
-              scale: bool = False,
-              out_dtype: Optional[np.dtype] = np.float32) -> np.ndarray:
-    """
-    Normalize image(s) with (img - mean) / std.
-
-    img: HWC or CHW single image or batched NHWC/NCHW array.
-    mean/std: length == n_channels (e.g., 3).
-    channel_axis: axis index of channels, default -1 (H,W,C).
-    scale: if True and img dtype is integer, divide by 255.0 first.
-    out_dtype: output dtype (usually float32).
-    """
-    a = img.astype(out_dtype, copy=False)
-    if scale and np.issubdtype(img.dtype, np.integer):
-        a = a / 255.0
-
-    mean = np.array(mean, dtype=out_dtype)
-    std = np.array(std, dtype=out_dtype)
-
-    # reshape mean/std to broadcast over image dims
-    shape = [1] * a.ndim
-    shape[channel_axis] = mean.size
-    mean = mean.reshape(shape)
-    std = std.reshape(shape)
-
-    return (a - mean) / std
-
-
-def pil_to_numpy_array(img: Image.Image) -> np.ndarray:
-    """
-    Convert PIL RGB image to numpy array with shape (C, H, W), dtype float32 scaled to [0,1].
-    """
-    arr = np.asarray(img, dtype=np.float32)  # H, W, C
-    if arr.ndim == 2:  # grayscale -> replicate channels
-        arr = np.stack([arr, arr, arr], axis=-1)
-    # ensure RGB ordering; PIL.Image.convert("RGB") ensures this
-    arr = arr.transpose(2, 0, 1)  # C, H, W
-    arr = arr / 255.0
-    return arr
 
 
 class ManifestGenerator:
@@ -190,16 +114,16 @@ class ManifestGenerator:
 
         # Letterbox
         if self.letterbox:
-            img = Letterbox(self.resize_height, self.resize_width, img)
+            img = self.Letterbox(self.resize_height, self.resize_width, img)
         else:
             img = img.resize((self.resize_width, self.resize_height), Image.BILINEAR)
 
-        img_arr = pil_to_numpy_array(img)  # C,H,W
+        img_arr = self._pil_to_numpy_array(img)  # C,H,W
         img.close()
 
         # Normalize
         if isinstance(self.normalize, dict):
-            img_arr = Normalize(img_arr,
+            img_arr = self.Normalize(img_arr,
                                 mean=self.normalize.get("mean", [0.485, 0.456, 0.406]),
                                 std=self.normalize.get("std", [0.229, 0.224, 0.225]))
         elif self.normalize is False:
@@ -226,6 +150,83 @@ class ManifestGenerator:
         cap.release()
         cv2.destroyAllWindows()
         return img
+    
+    def _pil_to_numpy_array(self, img: Image.Image) -> np.ndarray:
+        """
+        Convert PIL RGB image to numpy array with shape (C, H, W), dtype float32 scaled to [0,1].
+        """
+        arr = np.asarray(img, dtype=np.float32)  # H, W, C
+        if arr.ndim == 2:  # grayscale -> replicate channels
+            arr = np.stack([arr, arr, arr], axis=-1)
+        # ensure RGB ordering; PIL.Image.convert("RGB") ensures this
+        arr = arr.transpose(2, 0, 1)  # C, H, W
+        arr = arr / 255.0
+        return arr
+
+    def Letterbox(self, 
+                  resize_height: int,
+                  resize_width: int,
+                  image: Image.Image) -> Image.Image:
+        # PIL image size: (width, height)
+        width, height = image.size
+        target_w, target_h = resize_width, resize_height
+
+        # If aspect ratios are already the same (rounded to 2 decimals), just resize
+        if round((width / height), 2) == round((target_w / target_h), 2):
+            return image.resize((target_w, target_h), Image.BILINEAR)
+
+        # Compute required padding to achieve target aspect ratio, do center pad
+        target_ar = target_w / target_h
+        src_ar = width / height
+
+        if src_ar < target_ar:
+            # source narrower -> pad left/right
+            new_width = int(target_ar * height)
+            pad_total = max(0, new_width - width)
+            pad_left = pad_total // 2
+            pad_right = pad_total - pad_left
+            padded = ImageOps.expand(image, border=(pad_left, 0, pad_right, 0), fill=0)
+        else:
+            # source wider -> pad top/bottom
+            new_height = int(width / target_ar)
+            pad_total = max(0, new_height - height)
+            pad_top = pad_total // 2
+            pad_bottom = pad_total - pad_top
+            padded = ImageOps.expand(image, border=(0, pad_top, 0, pad_bottom), fill=0)
+
+        return padded.resize((target_w, target_h), Image.BILINEAR)
+
+
+    def Normalize(self, 
+                  img: np.ndarray,
+                  mean: Sequence[float],
+                  std: Sequence[float],
+                  channel_axis: int = 0,
+                  scale: bool = False,
+                  out_dtype: Optional[np.dtype] = np.float32) -> np.ndarray:
+        """
+        Normalize image(s) with (img - mean) / std.
+
+        img: HWC or CHW single image or batched NHWC/NCHW array.
+        mean/std: length == n_channels (e.g., 3).
+        channel_axis: axis index of channels, default -1 (H,W,C).
+        scale: if True and img dtype is integer, divide by 255.0 first.
+        out_dtype: output dtype (usually float32).
+        """
+        a = img.astype(out_dtype, copy=False)
+        if scale and np.issubdtype(img.dtype, np.integer):
+            a = a / 255.0
+
+        mean = np.array(mean, dtype=out_dtype)
+        std = np.array(std, dtype=out_dtype)
+
+        # reshape mean/std to broadcast over image dims
+        shape = [1] * a.ndim
+        shape[channel_axis] = mean.size
+        mean = mean.reshape(shape)
+        std = std.reshape(shape)
+
+        return (a - mean) / std
 
 
 def manifest_dataloader(manifest: pd.DataFrame,
@@ -234,8 +235,8 @@ def manifest_dataloader(manifest: pd.DataFrame,
                         crop_coord: str = 'relative',
                         normalize: bool = True,
                         letterbox: bool = False,
-                        resize_height: int = 299,
-                        resize_width: int = 299) -> Iterable[Tuple[np.ndarray, List[str], np.ndarray, np.ndarray]]:
+                        resize_height: int = SDZWA_CLASSIFIER_SIZE,
+                        resize_width: int = SDZWA_CLASSIFIER_SIZE):
     '''
     Return a simple generator that yields batches of data as numpy arrays.
 

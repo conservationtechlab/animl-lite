@@ -2,9 +2,14 @@
 General utils
 
 """
-import cv2
 import numpy as np
 import onnxruntime as ort
+
+
+MEGADETECTORv5_SIZE = 1280
+SDZWA_CLASSIFIER_SIZE = 299
+
+MODEL_TYPES = {"megadetector", "yolo", "miewid", "classifier"}
 
 
 def softmax(x):
@@ -14,42 +19,29 @@ def softmax(x):
     return np.exp(x)/np.sum(np.exp(x), axis=1, keepdims=True)
 
 
-def tensor_to_onnx(tensor, channel_last=False):
-    '''
-    Helper function for onnx, shifts dims to BxHxWxC
-    '''
-    if channel_last:
-        tensor = tensor.permute(0, 2, 3, 1)  # reorder BxCxHxW to BxHxWxC
-
-    tensor = tensor.numpy()
-
-    return tensor
-
-
 def get_onnx_device(user_set=None, quiet=False):
     """
     Get gpu if available
-
-    #TODO: test if user picks bad cuda device
     """
     providers = ort.get_available_providers()
+    
     if 'CUDAExecutionProvider' in providers:
-        # no user input
-        if user_set is None:
-            if not quiet:
-                print('Using available CUDA device.')
-            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']     
-        # user selects cpu
-        elif user_set == 'cpu':
+        # user selects cuda device and is available
+        if user_set == 'cpu':
             if not quiet:
                 print('CUDA is available but set to cpu by user.')
                 providers = ['CPUExecutionProvider']
         # user selects cuda device and is available
-        elif user_set.startswith('cuda'):
+        elif user_set in ['cuda', 'cuda:0', 'cuda:1', 'cuda:2', 'cuda:3']:
             device_number = int(user_set.split(':')[-1]) if ':' in user_set else 0
             providers = [('CUDAExecutionProvider', {'device_id': device_number}), 'CPUExecutionProvider']
             if not quiet:
                 print(f'Attempting to use CUDA device: {user_set}')
+        # no user input
+        elif user_set is None:
+            if not quiet:
+                print('Using available CUDA device.')
+            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']     
         # unknown user input
         else:
             if not quiet:
@@ -58,67 +50,19 @@ def get_onnx_device(user_set=None, quiet=False):
 
     # cuda not available
     else:
-        if user_set is not None and user_set in {'cuda', 'cuda:0', 'cuda:1', 'cuda:2', 'cuda:3'}:
+        if user_set is not None and user_set in ['cuda', 'cuda:0', 'cuda:1', 'cuda:2', 'cuda:3']:
             if not quiet:
                 print('Warning: CUDA device specified but not available, using CPU instead.')
-        providers = ['CPUExecutionProvider']
+            providers = ['CPUExecutionProvider']
     
     return providers
  
 # ==============================================================================
 # COORDINATE CONVERSION
 # ==============================================================================
-def xyxyc2xywh(x):
-    # Convert nx4 boxes from [x1, y1, x2, y2] to [x, y, w, h] where xy1=top-left, xy2=bottom-right
-    y = np.copy(x)
-    y[:, 0] = (x[:, 0] + x[:, 2]) / 2  # x center
-    y[:, 1] = (x[:, 1] + x[:, 3]) / 2  # y center
-    y[:, 2] = x[:, 2] - x[:, 0]  # width
-    y[:, 3] = x[:, 3] - x[:, 1]  # height
-    return y
 
 
-def xywhc2xyxy(x):
-    # Convert nx4 boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
-    y = np.copy(x)
-    y[:, 0] = x[:, 0] - x[:, 2] / 2  # top left x
-    y[:, 1] = x[:, 1] - x[:, 3] / 2  # top left y
-    y[:, 2] = x[:, 0] + x[:, 2] / 2  # bottom right x
-    y[:, 3] = x[:, 1] + x[:, 3] / 2  # bottom right y
-    return y
-
-
-def xywhn2xyxy(x, w=640, h=640, padw=0, padh=0):
-    # Convert nx4 boxes from [x, y, w, h] normalized to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
-    y = np.copy(x)
-    y[:, 0] = w * (x[:, 0] - x[:, 2] / 2) + padw  # top left x
-    y[:, 1] = h * (x[:, 1] - x[:, 3] / 2) + padh  # top left y
-    y[:, 2] = w * (x[:, 0] + x[:, 2] / 2) + padw  # bottom right x
-    y[:, 3] = h * (x[:, 1] + x[:, 3] / 2) + padh  # bottom right y
-    return y
-
-
-def xyxyc2xywhn(x, w=640, h=640, clip=False, eps=0.0):
-    # Convert nx4 boxes from [x1, y1, x2, y2] to [x, y, w, h] normalized where xy1=top-left, xy2=bottom-right
-    if clip:
-        clip_coords(x, (h - eps, w - eps))  # warning: inplace clip
-    y = np.copy(x)
-    y[:, 0] = ((x[:, 0] + x[:, 2]) / 2) / w  # x center
-    y[:, 1] = ((x[:, 1] + x[:, 3]) / 2) / h  # y center
-    y[:, 2] = (x[:, 2] - x[:, 0]) / w  # width
-    y[:, 3] = (x[:, 3] - x[:, 1]) / h  # height
-    return y
-
-
-def xyn2xy(x, w=640, h=640, padw=0, padh=0):
-    # Convert normalized segments into pixel segments, shape (n,2)
-    y = np.copy(x)
-    y[:, 0] = w * x[:, 0] + padw  # top left x
-    y[:, 1] = h * x[:, 1] + padh  # top left y
-    return y
-
-
-def xywh2xyxy(bbox):
+def _xywh2xyxy(bbox):
     """
     Converts bounding boxes from xywh to xyxy format.
 
@@ -134,7 +78,7 @@ def xywh2xyxy(bbox):
     return y
 
 # THIS ONE
-def xyxy2xywh(bbox):
+def _xyxy2xywh(bbox):
     """
     Converts bounding boxes from xywh to xyxy format.
 
@@ -151,9 +95,27 @@ def xyxy2xywh(bbox):
     return y
 
 
-def convert_minxywh_to_absxyxy(bbox, width, height):
+def _xywh_to_xywhc(bbox):
+    """
+    Converts bounding boxes from xywh to xywhc format.
+
+    Args:
+        bbox (list): Bounding box coordinates in the format [x_min, y_min, width, height].
+                     x_min,y_min are the top left corner.
+    Returns:
+        list: Normalized bounding box coordinates in the format [x_center, y_center, width, height].
+    """
+    y = np.copy(bbox)
+    y[0] = y[0] + y[2] / 2  # x center
+    y[1] = y[1] + y[3] / 2  # y center
+    return y
+
+
+def _xywh_to_absxyxy(bbox, width, height):
     """
     Converts bounding box from [x_min, y_min, width, height] to [x1, y1, x2, y2] format.
+    Used for converting annotation bounding boxes to absolute pixel coordinates for
+    visualization and evaluation. (plot_box)
 
     Args:
         bbox (list): Bounding box in the format [x_min, y_min, width, height].
@@ -172,14 +134,7 @@ def convert_minxywh_to_absxyxy(bbox, width, height):
     return [int(x1 * width), int(y1 * height), int(x2 * width), int(y2 * height)]
 
 
-
-def clip_coords(boxes, shape):
-    # Clip bounding xyxy bounding boxes to image shape (height, width)
-    boxes[:, [0, 2]] = boxes[:, [0, 2]].clip(0, shape[1])  # x1, x2
-    boxes[:, [1, 3]] = boxes[:, [1, 3]].clip(0, shape[0])  # y1, y2
-
-
-def normalize_boxes(bbox, image_sizes):
+def _normalize_boxes(bbox, image_sizes):
     """
     Converts absolute bounding box coordinates to relative coordinates.
 
@@ -197,49 +152,7 @@ def normalize_boxes(bbox, image_sizes):
     return y
 
 
-# ==============================================================================
-# Augmentations
-# ==============================================================================
-
-def letterbox(im: np.ndarray, new_shape = (640, 640),
-              color = (114, 114, 114),
-              auto: bool = True,
-              scaleFill: bool = False,
-              scaleup: bool = True,
-              stride: int = 32):
-    # Resize and pad image while meeting stride-multiple constraints
-    shape = im.shape[:2]  # current shape [height, width]
-    if isinstance(new_shape, int):
-        new_shape = (new_shape, new_shape)
-
-    # Scale ratio (new / old)
-    r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
-    if not scaleup:  # only scale down, do not scale up (for better val mAP)
-        r = min(r, 1.0)
-
-    # Compute padding
-    ratio = r, r  # width, height ratios
-    new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
-    dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
-    if auto:  # minimum rectangle
-        dw, dh = np.mod(dw, stride), np.mod(dh, stride)  # wh padding
-    elif scaleFill:  # stretch
-        dw, dh = 0.0, 0.0
-        new_unpad = (new_shape[1], new_shape[0])
-        ratio = new_shape[1] / shape[1], new_shape[0] / shape[0]  # width, height ratios
-
-    dw /= 2  # divide padding into 2 sides
-    dh /= 2
-
-    if shape[::-1] != new_unpad:  # resize
-        im = cv2.resize(im, new_unpad, interpolation=cv2.INTER_LINEAR)
-    top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
-    left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
-    im = cv2.copyMakeBorder(im, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
-    return im, ratio, (dw, dh)
-
-
-def scale_letterbox(bbox, resized_shape, original_shape):
+def _scale_letterbox(bbox, resized_shape, original_shape):
     """
     Converts bounding box coordinates from a resized, letterboxed image space
     back to the original image's coordinate space. Assumes input coordinates
@@ -261,7 +174,7 @@ def scale_letterbox(bbox, resized_shape, original_shape):
                     format.
     """
     # Convert input xywh (top-left corner) to xyxy
-    xyxy_coords = xywh2xyxy(bbox)
+    xyxy_coords = _xywh2xyxy(bbox)
 
     # Calculate the scaling ratio and padding
     ratio = min(resized_shape[0] / original_shape[0], resized_shape[1] / original_shape[1])
@@ -282,6 +195,6 @@ def scale_letterbox(bbox, resized_shape, original_shape):
     xyxy_coords[[1, 3]] = np.clip(xyxy_coords[[1, 3]], 0, 1) 
 
     # Convert final xyxy to xywh (top-left corner)
-    xywh_coords = xyxy2xywh(xyxy_coords)
+    xywh_coords = _xyxy2xywh(xyxy_coords)
 
     return xywh_coords
