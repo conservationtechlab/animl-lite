@@ -27,7 +27,7 @@ from animl.file_management import (IMAGE_EXTENSIONS, VALID_EXTENSIONS,
                                    save_yaml, sequence_calculation,)
 from animl.generator import (ManifestGenerator, manifest_dataloader,)
 from animl.pipeline import (from_config, from_paths,)
-from animl.reid import (compute_batched_distance_matrix,
+from animl.reid import (MIEWID_SIZE, compute_batched_distance_matrix,
                         compute_distance_matrix, cosine_distance, distance,
                         euclidean_squared_distance, extract_miew_embeddings,
                         inference, load_miew, remove_diagonal,)

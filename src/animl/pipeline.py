@@ -146,6 +146,7 @@ def from_config(config: str):
 
     # get image dir and cuda defaults
     image_dir = cfg['image_dir']
+    device = cfg.get('device', 'cpu')
 
     print("Searching directory...")
     # Create a working directory, default to image_dir

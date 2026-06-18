@@ -95,7 +95,14 @@ def detect(detector,
                                       model_type=detector.model_type)
         return results
 
-    # Full manifest, select file_col
+    # list of image filepaths
+    elif isinstance(image_file_names, list):
+        # create a data frame from list of image paths
+        manifest = pd.DataFrame(image_file_names, columns=[file_col])
+        # no frame column, assume all images and set to 0
+        manifest['frame'] = 0
+
+    # full manifest, select file_col
     elif isinstance(image_file_names, pd.DataFrame):
         if file_col not in image_file_names.columns:
             raise ValueError(f"file_col {file_col} not found in manifest columns")
@@ -105,6 +112,19 @@ def detect(detector,
             image_file_names['frame'] = 0
         # create a list of image paths
         manifest = image_file_names[[file_col, 'frame']]
+
+    # single row pd.Series, select file_col
+    elif isinstance(image_file_names, pd.Series):
+        if file_col not in image_file_names.index:
+            raise ValueError(f"file_col {file_col} not found in Series index")
+        if 'frame' not in image_file_names.index:
+            print("Warning: 'frame' column not found in Series index. Defaulting to 0 assuming images.")
+            image_file_names['frame'] = 0
+        # create a data frame from image_file_names
+        manifest = pd.DataFrame(image_file_names).T
+    # column from pd.DataFrame, expected input
+    else:
+        raise ValueError('image_file_names is not a recognized object')
 
     # load checkpoint
     if checkpoint_path and file_management.check_file(checkpoint_path, output_type="Megadetector raw output"):

@@ -5,6 +5,7 @@ Provides functions for creating, removing, and updating sorted symlinks.
 
 @ Kyra Swanson 2023
 """
+import json
 import os
 import pandas as pd
 from typing import Optional, Union
