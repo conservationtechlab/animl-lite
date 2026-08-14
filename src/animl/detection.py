@@ -17,7 +17,7 @@ import onnxruntime as ort
 
 from animl import file_management
 from animl.generator import manifest_dataloader
-from animl.utils.general import _normalize_boxes, _xyxy2xywh, _scale_letterbox, get_onnx_device
+from animl.utils.general import _normalize_boxes, _xyxy2xywh, _scale_letterbox, get_onnx_device, _laplacian_variance
 from animl.utils.visualization import MD_LABELS
 
 
@@ -49,6 +49,7 @@ def detect(detector,
            letterbox: bool = True,
            category_map: Optional[dict] = MD_LABELS,
            confidence_threshold: float = 0.1,
+           calculate_clarity: bool = False,
            file_col: str = 'filepath',
            checkpoint_path: Optional[str] = None,
            checkpoint_frequency: int = -1) -> list[dict]:
@@ -64,6 +65,7 @@ def detect(detector,
         letterbox (bool): if True, resize and pad image to keep aspect ratio, else resize without padding
         category_map (dict): mapping of category IDs to human-readable labels
         confidence_threshold (float): only detections above this threshold are returned
+        calculate_clarity (bool): if True, calculate image clarity using Laplacian variance
         file_col (str): column name containing file paths
         device (str): specify to run on cpu or gpu
         checkpoint_path (str): path to checkpoint file
@@ -160,7 +162,8 @@ def detect(detector,
                                       letterbox,
                                       confidence_threshold=confidence_threshold,
                                       category_map=category_map,
-                                      model_type=detector.model_type)
+                                      model_type=detector.model_type,
+                                      calculate_clarity=calculate_clarity)
         # Process outputs to match expected format
         results.extend(outputs)
 
@@ -181,7 +184,8 @@ def _convert_detections(predictions: list,
                         letterbox: bool,
                         confidence_threshold: float = 0.1,
                         model_type: str = 'megadetector',
-                        category_map: dict = MD_LABELS) -> pd.DataFrame:
+                        category_map: dict = MD_LABELS,
+                        calculate_clarity=False) -> pd.DataFrame:
     # Converts output into nested list with categories, conf, and bboxes in expected format for parsing function.
     # Supports YOLOv5/MDv5, YOLOv6+, and ONNX models with either relative or absolute bounding box outputs.
     # If letterbox=True, rescales bboxes back to original image size.
@@ -246,6 +250,15 @@ def _convert_detections(predictions: list,
                              'bbox_y': float(round(bbox[1], 4)),
                              'bbox_w': float(round(bbox[2], 4)),
                              'bbox_h': float(round(bbox[3], 4))}
+
+                if calculate_clarity:
+                    # calculate image clarity using Laplacian variance
+                    clarity = _laplacian_variance(image_tensors[i].transpose(1, 2, 0))
+                    detection['clarity'] =  min(clarity / 500, 1.0) 
+                    detection['score'] = (0.4 * detection['conf'] + 
+                                          0.3 * detection['bbox_w'] * detection['bbox_h'] + 
+                                          0.3 * detection['clarity'])
+
                 detections.append(detection)
 
             data = {'filepath': str(image_paths[i]),
@@ -261,7 +274,8 @@ def parse_detections(detections: list[dict],
                      manifest: Optional[pd.DataFrame] = None,
                      out_file: Optional[str] = None,
                      threshold: float = 0,
-                     file_col: str = "filepath"):
+                     file_col: str = "filepath",
+                     score: bool = False) -> pd.DataFrame:
     """
     Converts listed output from detector to DataFrame.
 
@@ -271,6 +285,7 @@ def parse_detections(detections: list[dict],
         out_file (str): path to save dataframe
         threshold (float): parse only detections above given confidence threshold
         file_col (str): if manifest, merge results onto file_col
+        score (bool): if True, calculate a score for each detection based on confidence, bbox size, and clarity
 
     Returns:
         df (pd.DataFrame): formatted md outputs, one row per detection
@@ -307,6 +322,9 @@ def parse_detections(detections: list[dict],
                     'category': frame['category'] if 'category' in frame else None,
                     'category_label': frame['category_label'] if 'category_label' in frame else 'empty',
                     'conf': None, 'bbox_x': None, 'bbox_y': None, 'bbox_w': None, 'bbox_h': None}
+            if score:
+                data['score'] = None
+                data['clarity'] = None
             lst.append(data)
 
         else:
@@ -322,6 +340,10 @@ def parse_detections(detections: list[dict],
                             'bbox_y': np.clip(detection['bbox_y'], 0, 1),
                             'bbox_w': np.clip(detection['bbox_w'], 0, 1),
                             'bbox_h': np.clip(detection['bbox_h'], 0, 1)}
+
+                    if score:
+                        data['score'] = detection.get('score', None)
+                        data['clarity'] = detection.get('clarity', None)
                     lst.append(data)
 
     df = pd.DataFrame(lst)

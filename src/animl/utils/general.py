@@ -2,6 +2,7 @@
 General utils
 
 """
+import cv2
 import numpy as np
 import onnxruntime as ort
 
@@ -58,9 +59,29 @@ def get_onnx_device(user_set=None, quiet=False):
     return providers
  
 # ==============================================================================
-# COORDINATE CONVERSION
+# FRAME SELECTION
 # ==============================================================================
 
+def _laplacian_variance(image):
+    """Calculate Laplacian variance for sharpness"""
+    # Convert to grayscale
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    else:
+        gray = image
+    
+    # Scale float [0,1] to uint8 [0,255]
+    if gray.dtype == np.float32 or gray.dtype == np.float64:
+        gray = (gray * 255).astype(np.uint8)
+    
+    # Compute Laplacian variance
+    laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+    
+    return laplacian.var()
+
+# ==============================================================================
+# COORDINATE CONVERSION
+# ==============================================================================
 
 def _xywh2xyxy(bbox):
     """
