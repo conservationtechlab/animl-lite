@@ -30,6 +30,7 @@ def get_images(files, file_col: str = "filepath"):
     images = images.assign(frame=0)
     return images
 
+
 def get_videos(files, file_col: str = "filepath"):
     """
     Get videos from a DataFrame of files
@@ -42,6 +43,7 @@ def get_videos(files, file_col: str = "filepath"):
     videos = files[files[file_col].apply(
         lambda x: Path(x).suffix.lower()).isin(file_management.VIDEO_EXTENSIONS)]
     return videos
+
 
 def extract_frames(files,
                    frames: int = 5,
@@ -155,9 +157,9 @@ def _count_frames(filepath, frames=5, fps=None) -> int:
             # Attempt to get FPS using ffmpeg if OpenCV fails
             video_fps = get_fps_from_ffmpeg(filepath)
             if video_fps is None:
-                print(f"Could not determine video FPS, defaulting to 30 FPS.")
+                print("Could not determine video FPS, defaulting to 30 FPS.")
                 video_fps = 30  # Default to 30 if unable to determine
-                
+
         n_frames = int(frame_count / video_fps) * fps
         sampled_times = [i / fps for i in range(n_frames)]
         frames_saved = [min(int(round(t * video_fps)), frame_count-1) for t in sampled_times]
@@ -210,7 +212,7 @@ def get_fps_from_ffmpeg(video_path):
         # Search for fps value in output
         # Pattern: "X fps" where X is a number (can be decimal)
         match = re.search(r'(\d+\.?\d*)\s+fps', result.stderr)
-        
+
         if match:
             fps = float(match.group(1))
             print(f"FPS: {fps}")
@@ -218,7 +220,7 @@ def get_fps_from_ffmpeg(video_path):
         else:
             print("Could not find fps in ffmpeg output")
             return None
-    
+
     except Exception as e:
         print(f"Error: {e}")
         return None

@@ -8,7 +8,6 @@ parse_detections() converts json output into a dataframe
 from shutil import copyfile
 from typing import Optional
 import time
-from animl.utils.visualization import MD_LABELS
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -154,6 +153,11 @@ def detect(detector,
     for _, batch in tqdm(enumerate(dataloader), total=len(manifest)):
         count += 1
 
+        # handle bad batches (eg. empty images, corrupted files)
+        if batch is None:
+            print(f"Warning: batch {count} is None, skipping.")
+            continue
+
         # ONNX Runtime inference
         input_name = detector.get_inputs()[0].name
         outputs = detector.run(None, {input_name: batch[0]})[0]
@@ -196,7 +200,7 @@ def _convert_detections(predictions: list,
     image_frames = batch_from_dataloader[2]
     image_sizes = batch_from_dataloader[3]
 
-        # if no category map provided, default to MD_LABELS
+    # if no category map provided, default to MD_LABELS
     if category_map is None:
         print("No category map provided, defaulting to MD_LABELS. ",
               "This may lead to incorrect category labels if using a custom model.")
@@ -254,9 +258,9 @@ def _convert_detections(predictions: list,
                 if calculate_clarity:
                     # calculate image clarity using Laplacian variance
                     clarity = _laplacian_variance(image_tensors[i].transpose(1, 2, 0))
-                    detection['clarity'] =  min(clarity / 500, 1.0) 
-                    detection['score'] = (0.4 * detection['conf'] + 
-                                          0.3 * detection['bbox_w'] * detection['bbox_h'] + 
+                    detection['clarity'] = min(clarity / 500, 1.0)
+                    detection['score'] = (0.4 * detection['conf'] +
+                                          0.3 * detection['bbox_w'] * detection['bbox_h'] +
                                           0.3 * detection['clarity'])
 
                 detections.append(detection)
@@ -382,7 +386,6 @@ def _save_detection_checkpoint(checkpoint_path: str, results: dict) -> None:
     # Remove the backup checkpoint if it exists
     if checkpoint_tmp_path is not None:
         Path(checkpoint_tmp_path).unlink()
-
 
 
 def get_animals(manifest: pd.DataFrame):

@@ -124,8 +124,8 @@ class ManifestGenerator:
         # Normalize
         if isinstance(self.normalize, dict):
             img_arr = self.Normalize(img_arr,
-                                mean=self.normalize.get("mean", [0.485, 0.456, 0.406]),
-                                std=self.normalize.get("std", [0.229, 0.224, 0.225]))
+                                     mean=self.normalize.get("mean", [0.485, 0.456, 0.406]),
+                                     std=self.normalize.get("std", [0.229, 0.224, 0.225]))
         elif self.normalize is False:
             # unnormalize back to [0,255] if needed
             img_arr = img_arr * 255.0
@@ -150,7 +150,7 @@ class ManifestGenerator:
         cap.release()
         cv2.destroyAllWindows()
         return img
-    
+
     def _pil_to_numpy_array(self, img: Image.Image) -> np.ndarray:
         """
         Convert PIL RGB image to numpy array with shape (C, H, W), dtype float32 scaled to [0,1].
@@ -163,7 +163,7 @@ class ManifestGenerator:
         arr = arr / 255.0
         return arr
 
-    def Letterbox(self, 
+    def Letterbox(self,
                   resize_height: int,
                   resize_width: int,
                   image: Image.Image) -> Image.Image:
@@ -196,8 +196,7 @@ class ManifestGenerator:
 
         return padded.resize((target_w, target_h), Image.BILINEAR)
 
-
-    def Normalize(self, 
+    def Normalize(self,
                   img: np.ndarray,
                   mean: Sequence[float],
                   std: Sequence[float],
