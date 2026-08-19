@@ -1,6 +1,6 @@
 [project]
 name = "animl-lite"  
-version = "3.3.0"
+version = "3.3.1"
 description = "Tools for classifying camera trap images"  
 
 readme = "README.md" 
@@ -13,7 +13,7 @@ requires-python = ">=3.12,<3.14"
 dependencies = [
     "numpy>=2.0.2", 
     "pandas>=2.2.2,<3.0.0", 
-    "pillow>=11.0.0", 
+    "pillow>=12.3.0", 
     "pyexiftool>=0.5.6",
     "opencv-python>=4.12.0.88", 
     "tqdm>=4.66.5",
