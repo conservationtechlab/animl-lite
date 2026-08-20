@@ -123,9 +123,10 @@ def test_parse_detections_raises_on_non_list():
 
 def test_parse_detections_threshold_filters(sample_detections_with_animal):
     df = parse_detections(sample_detections_with_animal, threshold=0.95)
-    # All detections below 0.95 should be filtered out.
+    # The only detection has conf=0.9, which is below the threshold of 0.95,
+    # so it should be filtered out leaving no animal rows with a non-null conf.
     animal_rows = df[df["conf"].notna()]
-    assert all(animal_rows["conf"] > 0.95)
+    assert animal_rows.empty
 
 
 def test_parse_detections_merges_manifest(sample_detections_with_animal, tmp_path: Path):

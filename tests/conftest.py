@@ -15,6 +15,8 @@ def _install_optional_stubs() -> None:
         import cv2  # noqa: F401
     except Exception:
         cv2 = types.ModuleType("cv2")
+        # Values match the actual OpenCV constants so that _FakeCapture.get()
+        # dispatches correctly without the real library present.
         cv2.CAP_PROP_FRAME_COUNT = 7
         cv2.CAP_PROP_FPS = 5
         cv2.CAP_PROP_POS_FRAMES = 1
