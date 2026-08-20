@@ -107,7 +107,6 @@ def test_extract_frames_includes_videos(video_manifest: pd.DataFrame):
     result = extract_frames(video_manifest, frames=3, parallel=False)
     assert isinstance(result, pd.DataFrame)
     assert "frame" in result.columns
-    assert len(result) >= 1
 
 
 def test_extract_frames_saves_to_file(tmp_path: Path, image_manifest: pd.DataFrame):

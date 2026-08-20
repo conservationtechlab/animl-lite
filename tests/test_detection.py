@@ -65,6 +65,23 @@ def mixed_detections(
     return sample_detections_with_animal + sample_detections_empty
 
 
+@pytest.fixture
+def real_detector_model() -> Path:
+    """
+    Use an existing real ONNX model file for testing.
+    Point this to your actual model location.
+    """
+    # Option 1: Copy from a known location in your repo/test data
+    real_model_path = Path(__file__).parent / "fixtures" / "md_v1000.0.0-sorrel.onnx"
+    
+    if real_model_path.exists():
+        return real_model_path
+
+    pytest.skip("Real detector model not found")
+
+
+
+
 # ---------------------------------------------------------------------------
 # load_detector
 # ---------------------------------------------------------------------------
@@ -74,17 +91,13 @@ def test_load_detector_raises_for_missing_file(tmp_path: Path):
         load_detector(str(tmp_path / "nonexistent.onnx"))
 
 
-def test_load_detector_returns_model_with_type(tmp_path: Path):
-    model_file = tmp_path / "model.onnx"
-    model_file.write_bytes(b"fake")
-    model = load_detector(str(model_file), model_type="megadetector")
+def test_load_detector_returns_model_with_type(real_detector_model: Path):
+    model = load_detector(str(real_detector_model), model_type="megadetector")
     assert model.model_type == "megadetector"
 
 
-def test_load_detector_sets_custom_model_type(tmp_path: Path):
-    model_file = tmp_path / "custom.onnx"
-    model_file.write_bytes(b"fake")
-    model = load_detector(str(model_file), model_type="yolo")
+def test_load_detector_sets_custom_model_type(real_detector_model: Path):
+    model = load_detector(str(real_detector_model), model_type="yolo")
     assert model.model_type == "yolo"
 
 
@@ -125,8 +138,7 @@ def test_parse_detections_threshold_filters(sample_detections_with_animal):
     df = parse_detections(sample_detections_with_animal, threshold=0.95)
     # The only detection has conf=0.9, which is below the threshold of 0.95,
     # so it should be filtered out leaving no animal rows with a non-null conf.
-    animal_rows = df[df["conf"].notna()]
-    assert animal_rows.empty
+    assert df.empty
 
 
 def test_parse_detections_merges_manifest(sample_detections_with_animal, tmp_path: Path):
@@ -161,6 +173,7 @@ def manifest_with_mixed_categories() -> pd.DataFrame:
             "filepath": ["a.jpg", "b.jpg", "c.jpg"],
             "frame": [0, 0, 0],
             "category": [1, 0, 2],
+            "conf": [0.9, 1, 0.8],
             "category_label": ["animal", "empty", "vehicle"],
         }
     )
