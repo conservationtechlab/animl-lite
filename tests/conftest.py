@@ -12,6 +12,44 @@ from PIL import Image
 
 def _install_optional_stubs() -> None:
     try:
+        import cv2  # noqa: F401
+    except Exception:
+        cv2 = types.ModuleType("cv2")
+        cv2.CAP_PROP_FRAME_COUNT = 7
+        cv2.CAP_PROP_FPS = 5
+        cv2.CAP_PROP_POS_FRAMES = 1
+        cv2.COLOR_BGR2RGB = 4
+
+        class _FakeCapture:
+            def __init__(self, *args, **kwargs):
+                self._opened = True
+
+            def isOpened(self):
+                return self._opened
+
+            def get(self, prop):
+                if prop == cv2.CAP_PROP_FRAME_COUNT:
+                    return 30
+                if prop == cv2.CAP_PROP_FPS:
+                    return 10.0
+                return 0
+
+            def set(self, prop, val):
+                pass
+
+            def read(self):
+                frame = np.zeros((24, 32, 3), dtype=np.uint8)
+                return True, frame
+
+            def release(self):
+                pass
+
+        cv2.VideoCapture = _FakeCapture
+        cv2.cvtColor = lambda img, code: img
+        cv2.destroyAllWindows = lambda: None
+        sys.modules["cv2"] = cv2
+
+    try:
         import onnxruntime  # noqa: F401
     except Exception:
         ort = types.ModuleType("onnxruntime")
