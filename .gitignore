@@ -1,5 +1,4 @@
 examples/
-tests/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -21,7 +20,6 @@ lib/
 lib64/
 parts/
 sdist/
-tests/
 var/
 wheels/
 pip-wheel-metadata/

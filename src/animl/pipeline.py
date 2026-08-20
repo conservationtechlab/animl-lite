@@ -4,7 +4,6 @@ Automated Pipeline Functions
 @ Kyra Swanson 2023
 """
 import pandas as pd
-from pathlib import Path
 
 from animl import (classification, detection, export, file_management, video_processing)
 from animl.utils import visualization
@@ -172,8 +171,6 @@ def from_config(config: str):
     if (file_management.check_file(working_dir.detections, output_type="Detections")):
         detections = file_management.load_data(working_dir.detections)
     else:
-
-
         detector = detection.load_detector(cfg['detector_file'], model_type=cfg.get('detector_type', 'megadetector'), device=device)
         categories = cfg.get('detector_class_list', None)
         if categories is None:
