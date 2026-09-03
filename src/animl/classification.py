@@ -79,8 +79,10 @@ def classify(model,
              detections,
              resize_width: int = generator.SDZWA_CLASSIFIER_SIZE,
              resize_height: int = generator.SDZWA_CLASSIFIER_SIZE,
+             batch_size: int = 16,
              file_col: str = 'filepath',
              crop: bool = True,
+             letterbox: bool = False,
              normalize: bool = True,
              out_file: Optional[str] = None):
     """
@@ -115,29 +117,51 @@ def classify(model,
             print("Warning: 'frame' column not found in manifest columns. Defaulting to 0 assuming images.")
             detections['frame'] = 0
 
-        dataset = generator.manifest_dataloader(detections, file_col=file_col, crop=crop,
-                                                resize_width=resize_width, resize_height=resize_height,
-                                                normalize=normalize)
+
+        dataset = generator.ONNXDataLoader(manifest=detections,
+                                              batch_size=batch_size,
+                                              resize_height=resize_height,
+                                              resize_width=resize_width,
+                                              crop=crop,
+                                              normalize=normalize,
+                                              letterbox=letterbox,
+                                              prefetch_size=2,
+                                              num_workers=4,  # 4 threads for loading
+                                              use_progress_bar=True)
+
     # Single File
     elif isinstance(detections, str):
         detections = pd.DataFrame({file_col: detections, 'frame': 0}, index=[0])
-        dataset = generator.manifest_dataloader(detections, file_col=file_col, crop=False,
-                                                resize_width=resize_width, resize_height=resize_height,
-                                                normalize=normalize)
+        dataset = generator.ONNXDataLoader(manifest=detections,
+                                           batch_size=batch_size,
+                                           resize_height=resize_height,
+                                           resize_width=resize_width,
+                                           crop=False,
+                                           normalize=normalize,
+                                           letterbox=letterbox,
+                                           prefetch_size=2,
+                                           num_workers=4,
+                                           use_progress_bar=True)
     # List of Files
     elif isinstance(detections, list):
         detections = pd.DataFrame({file_col: detections, 'frame': 0}, index=range(len(detections)))
-        dataset = generator.manifest_dataloader(detections, file_col=file_col, crop=False,
-                                                resize_width=resize_width, resize_height=resize_height,
-                                                normalize=normalize)
+        dataset = generator.ONNXDataLoader(manifest=detections,
+                                           batch_size=batch_size,
+                                           resize_height=resize_height,
+                                           resize_width=resize_width,
+                                           crop=False,
+                                           normalize=normalize,
+                                           letterbox=letterbox,
+                                           prefetch_size=2,
+                                           num_workers=4,
+                                           use_progress_bar=True)
     else:
         raise AssertionError("Input must be a data frame of crops, single file path or vector of file paths.")
 
     # Predict
     start_time = time()
-    for _, batch in tqdm(enumerate(dataset), total=len(detections)):
-        image = batch[0]
-        output = model.run(None, {model.get_inputs()[0].name: image})[0]
+    for batch_images, filepaths, frames, original_shapes in dataset:
+        output = model.run(None, {model.get_inputs()[0].name: batch_images})
         raw_output.extend(softmax(output))
 
     raw_output = np.vstack(raw_output)
