@@ -1,4 +1,4 @@
-__version__ = '3.3.1'
+__version__ = '3.3.2'
 
 from animl import classification
 from animl import detection
@@ -25,7 +25,7 @@ from animl.file_management import (IMAGE_EXTENSIONS, VALID_EXTENSIONS,
                                    check_file, class_list_to_dict, load_data,
                                    load_json, load_yaml, save_data, save_json,
                                    save_yaml, sequence_calculation,)
-from animl.generator import (ManifestGenerator, manifest_dataloader,)
+from animl.generator import (ManifestGenerator,)
 from animl.pipeline import (from_config, from_paths,)
 from animl.reid import (MIEWID_SIZE, compute_batched_distance_matrix,
                         compute_distance_matrix, cosine_distance, distance,
@@ -55,7 +55,7 @@ __all__ = ['IMAGE_EXTENSIONS', 'MD_COLORS', 'MD_LABELS', 'MEGADETECTORv5_SIZE',
            'get_empty', 'get_frame_as_image', 'get_images', 'get_onnx_device',
            'get_version', 'get_videos', 'inference', 'load_class_list',
            'load_classifier', 'load_data', 'load_detector', 'load_json',
-           'load_miew', 'load_yaml', 'manifest_dataloader', 'parse_detections',
+           'load_miew', 'load_yaml', 'parse_detections',
            'pipeline', 'plot_all_bounding_boxes', 'plot_box', 'plot_from_file',
            'reid', 'remove_diagonal', 'remove_link', 'save_data', 'save_json',
            'save_yaml', 'sequence_calculation', 'sequence_classification',

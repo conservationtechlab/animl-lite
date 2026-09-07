@@ -555,11 +555,11 @@ def export_timelapse(manifest: pd.DataFrame,
     if only_animal:
         save_data(animals,  Path(out_dir) / "animals.csv")
     else:
-        empty = manifest[manifest['category_label'] != 'animal']
+        empty = manifest[manifest['category_label'] != 'animal'].copy()
         # Adding prediction as person and human
         empty['class'] = empty['category_label'].apply(lambda x: 'person' if x == 'human' else x)
         # Changing classification conf = detection_conf instead of max_detection_conf
-        empty['classification_conf'] = empty.loc[:, 'detection_conf']
+        empty['classification_conf'] = empty['detection_conf']
         # Combining DataFrames and saving it to csv file for further use
         manifest = pd.concat([animals, empty])
         # save data
