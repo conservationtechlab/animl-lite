@@ -52,7 +52,8 @@ def extract_frames(files,
                    out_dir: str = None,
                    file_col: str = "filepath",
                    parallel: bool = True,
-                   num_workers: int = min(8, max(1, os.cpu_count() - 1))):
+                   num_workers: int = min(8, max(1, os.cpu_count() - 1)),
+                   use_progress_bar: bool = False):
     """
     Extract frames from video files in a given DataFrame.
     Can sample frames based on a specified number of frames or frames per second (fps).
@@ -92,7 +93,8 @@ def extract_frames(files,
         video_frames = []
         if parallel:
             pool = mp.Pool(num_workers)
-            output = [pool.apply(_count_frames, args=(video, frames, fps)) for video in tqdm(videos[file_col])]
+            output = [pool.apply(_count_frames, args=(video, frames, fps)) 
+                      for video in tqdm(videos[file_col], disable=not use_progress_bar)]
             output = list(filter(None, output))
             video_frames = vstack(output)
             video_frames = pd.DataFrame(video_frames, columns=[file_col, "frame"])
@@ -100,7 +102,7 @@ def extract_frames(files,
             pool.close()
 
         else:
-            for i, video in tqdm(enumerate(videos[file_col])):
+            for i, video in tqdm(enumerate(videos[file_col]), disable=not use_progress_bar):
                 output = _count_frames(video, frames=frames, fps=fps)
                 if output is not None:
                     video_frames.extend(output)

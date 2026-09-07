@@ -9,7 +9,6 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from time import time
-from tqdm import tqdm
 import onnxruntime
 
 from animl import generator, file_management
@@ -82,7 +81,12 @@ def classify(model,
              file_col: str = 'filepath',
              crop: bool = True,
              normalize: bool = True,
-             out_file: Optional[str] = None):
+             letterbox: bool = False,
+             batch_size: int = 16,
+             prefetch_size: int = 2,
+             num_workers: int = 2,
+             out_file: Optional[str] = None,
+             use_progress_bar: bool = True):
     """
     TODO: align with R version
     Predict species using classifier model.
@@ -115,29 +119,53 @@ def classify(model,
             print("Warning: 'frame' column not found in manifest columns. Defaulting to 0 assuming images.")
             detections['frame'] = 0
 
-        dataset = generator.manifest_dataloader(detections, file_col=file_col, crop=crop,
-                                                resize_width=resize_width, resize_height=resize_height,
-                                                normalize=normalize)
+        dataset = generator.ManifestGenerator(manifest=detections,
+                                              resize_height=resize_height,
+                                              resize_width=resize_width,
+                                              file_col=file_col,
+                                              crop=crop,
+                                              normalize=normalize,
+                                              letterbox=letterbox,
+                                              batch_size=batch_size,
+                                              prefetch_size=prefetch_size,
+                                              num_workers=num_workers,  # 4 threads for loading
+                                              use_progress_bar=use_progress_bar)
+
     # Single File
     elif isinstance(detections, str):
         detections = pd.DataFrame({file_col: detections, 'frame': 0}, index=[0])
-        dataset = generator.manifest_dataloader(detections, file_col=file_col, crop=False,
-                                                resize_width=resize_width, resize_height=resize_height,
-                                                normalize=normalize)
+        dataset = generator.ManifestGenerator(manifest=detections,
+                                              resize_height=resize_height,
+                                              resize_width=resize_width,
+                                              file_col=file_col,
+                                              crop=crop,
+                                              normalize=normalize,
+                                              letterbox=letterbox,
+                                              batch_size=batch_size,
+                                              prefetch_size=prefetch_size,
+                                              num_workers=num_workers,
+                                              use_progress_bar=use_progress_bar)
     # List of Files
     elif isinstance(detections, list):
         detections = pd.DataFrame({file_col: detections, 'frame': 0}, index=range(len(detections)))
-        dataset = generator.manifest_dataloader(detections, file_col=file_col, crop=False,
-                                                resize_width=resize_width, resize_height=resize_height,
-                                                normalize=normalize)
+        dataset = generator.ManifestGenerator(manifest=detections,
+                                              resize_height=resize_height,
+                                              resize_width=resize_width,
+                                              file_col=file_col,
+                                              crop=crop,
+                                              normalize=normalize,
+                                              letterbox=letterbox,
+                                              batch_size=batch_size,
+                                              prefetch_size=prefetch_size,
+                                              num_workers=num_workers,
+                                              use_progress_bar=use_progress_bar)
     else:
         raise AssertionError("Input must be a data frame of crops, single file path or vector of file paths.")
 
     # Predict
     start_time = time()
-    for _, batch in tqdm(enumerate(dataset), total=len(detections)):
-        image = batch[0]
-        output = model.run(None, {model.get_inputs()[0].name: image})[0]
+    for batch_images, _, _, _ in dataset:
+        output = model.run(None, {model.get_inputs()[0].name: batch_images})
         raw_output.extend(softmax(output))
 
     raw_output = np.vstack(raw_output)

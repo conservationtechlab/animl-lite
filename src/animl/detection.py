@@ -15,7 +15,7 @@ from tqdm import tqdm
 import onnxruntime as ort
 
 from animl import file_management
-from animl.generator import manifest_dataloader
+from animl.generator import ManifestGenerator
 from animl.utils.general import _normalize_boxes, _xyxy2xywh, _scale_letterbox, get_onnx_device, _laplacian_variance
 from animl.utils.visualization import MD_LABELS
 
@@ -45,13 +45,17 @@ def detect(detector,
            image_file_names,
            resize_width: int,
            resize_height: int,
+           file_col: str = 'filepath',
            letterbox: bool = True,
            category_map: Optional[dict] = MD_LABELS,
            confidence_threshold: float = 0.1,
            calculate_clarity: bool = False,
-           file_col: str = 'filepath',
+           batch_size: int = 8,
+           prefetch_size: int = 2,
+           num_workers: int = 2,
+           use_progress_bar: bool = True,
            checkpoint_path: Optional[str] = None,
-           checkpoint_frequency: int = -1) -> list[dict]:
+           checkpoint_frequency: int = -1,) -> list[dict]:
     """
     Runs Detector model on a batches of image files.
 
@@ -66,6 +70,10 @@ def detect(detector,
         confidence_threshold (float): only detections above this threshold are returned
         calculate_clarity (bool): if True, calculate image clarity using Laplacian variance
         file_col (str): column name containing file paths
+        batch_size (int): number of images per batch
+        prefetch_size (int): number of batches to prefetch
+        num_workers (int): number of worker threads for data loading
+        use_progress_bar (bool): whether to display a progress bar
         device (str): specify to run on cpu or gpu
         checkpoint_path (str): path to checkpoint file
         checkpoint_frequency (int): write results to checkpoint file every N images
@@ -79,17 +87,22 @@ def detect(detector,
     # Single image filepath
     if isinstance(image_file_names, str):
         # convert img path to tensor
-        batch_from_dataloader = manifest_dataloader(pd.DataFrame([[image_file_names, 0]], columns=['filepath', 'frame']),
-                                                    crop=False,
-                                                    normalize=True,
-                                                    letterbox=letterbox,
-                                                    resize_width=resize_width,
-                                                    resize_height=resize_height)
+        manifest = pd.DataFrame([[image_file_names, 0]], columns=['filepath', 'frame'])
+        dataloader = ManifestGenerator(manifest,
+                                       resize_width=resize_width,
+                                       resize_height=resize_height,
+                                       crop=False,
+                                       normalize=True,
+                                       letterbox=letterbox,
+                                       batch_size=batch_size,
+                                       prefetch_size=prefetch_size,
+                                       num_workers=num_workers,
+                                       use_progress_bar=use_progress_bar)
 
         input_name = detector.get_inputs()[0].name
-        outputs = detector.run(None, {input_name: batch_from_dataloader[0]})[0]
+        outputs = detector.run(None, {input_name: dataloader[0]})[0]
         results = _convert_detections(outputs,
-                                      batch_from_dataloader,
+                                      dataloader,
                                       letterbox,
                                       confidence_threshold=confidence_threshold,
                                       category_map=category_map,
@@ -142,15 +155,19 @@ def detect(detector,
     count = 0
 
     # create dataloader
-    dataloader = manifest_dataloader(manifest,
-                                     crop=False,
-                                     normalize=True,
-                                     letterbox=letterbox,
-                                     resize_width=resize_width,
-                                     resize_height=resize_height)
+    dataloader = ManifestGenerator(manifest,
+                                   resize_width=resize_width,
+                                   resize_height=resize_height,
+                                   crop=False,
+                                   normalize=True,
+                                   letterbox=letterbox,
+                                   batch_size=batch_size,
+                                   prefetch_size=prefetch_size,
+                                   num_workers=num_workers,
+                                   use_progress_bar=use_progress_bar)
 
     start_time = time.time()
-    for _, batch in tqdm(enumerate(dataloader), total=len(manifest)):
+    for batch in dataloader:
         count += 1
 
         # handle bad batches (eg. empty images, corrupted files)
@@ -176,7 +193,8 @@ def detect(detector,
             print('Writing a new checkpoint after having processed {} images since last restart'.format(count))
             _save_detection_checkpoint(checkpoint_path, results)
 
-    print(f"\nFinished detection. Total images processed: {len(results)} at {round(len(results)/(time.time() - start_time), 1)} img/s.")
+    if use_progress_bar:
+        print(f"\nFinished detection. Total images processed: {len(results)} at {round(len(results)/(time.time() - start_time), 1)} img/s.")
     if checkpoint_path:
         _save_detection_checkpoint(checkpoint_path, results)
 
@@ -279,7 +297,8 @@ def parse_detections(detections: list[dict],
                      out_file: Optional[str] = None,
                      threshold: float = 0,
                      file_col: str = "filepath",
-                     score: bool = False) -> pd.DataFrame:
+                     score: bool = False,
+                     use_progress_bar: bool = False) -> pd.DataFrame:
     """
     Converts listed output from detector to DataFrame.
 
@@ -312,7 +331,7 @@ def parse_detections(detections: list[dict],
         return file_management.load_data(out_file)
 
     lst = []
-    for frame in tqdm(detections):
+    for frame in tqdm(detections, disable=not use_progress_bar):
         try:
             frame_detections = frame['detections']
         except KeyError:
