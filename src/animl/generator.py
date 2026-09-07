@@ -37,16 +37,16 @@ class ManifestGenerator:
     '''
     def __init__(self, 
                  manifest: pd.DataFrame,
-                 file_col: str = "filepath",
-                 batch_size: int = 16,
                  resize_height: int = SDZWA_CLASSIFIER_SIZE,
                  resize_width: int = SDZWA_CLASSIFIER_SIZE,
+                 file_col: str = "filepath",
                  crop: bool = True,
                  crop_coord: str = 'relative',
                  normalize: bool = True,
-                 letterbox: bool = False, 
+                 letterbox: bool = False,
+                 batch_size: int = 16,
                  prefetch_size: int = 2,
-                 num_workers: int = 0,
+                 num_workers: int = 2,
                  dtype: np.dtype = np.float32,
                  use_progress_bar: bool = False) -> None:
 
