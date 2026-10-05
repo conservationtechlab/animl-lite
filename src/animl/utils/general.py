@@ -20,44 +20,71 @@ def softmax(x):
     return np.exp(x)/np.sum(np.exp(x), axis=1, keepdims=True)
 
 
+import onnxruntime as ort
+
+
 def get_onnx_device(user_set=None, quiet=False):
     """
-    Get gpu if available
-    """
-    providers = ort.get_available_providers()
-    
-    if 'CUDAExecutionProvider' in providers:
-        # user selects cuda device and is available
-        if user_set in ['cpu', 'CPUExecutionProvider']:
-            if not quiet:
-                print('CUDA is available but set to cpu by user.')
-                providers = ['CPUExecutionProvider']
-        # user selects cuda device and is available
-        elif user_set in ['CUDAExecutionProvider', 'cuda', 'cuda:0', 'cuda:1', 'cuda:2', 'cuda:3']:
-            device_number = int(user_set.split(':')[-1]) if ':' in user_set else 0
-            providers = [('CUDAExecutionProvider', {'device_id': device_number}), 'CPUExecutionProvider']
-            if not quiet:
-                print(f'Attempting to use CUDA device: {user_set}')
-        # no user input
-        elif user_set is None:
-            if not quiet:
-                print('Using available CUDA device.')
-            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']     
-        # unknown user input
-        else:
-            if not quiet:
-                print('User-specified device unknown, using available CUDA device.')
-            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+    Get the best available ONNX Runtime execution providers.
 
-    # cuda not available
-    else:
-        if user_set is not None and user_set in ['cuda', 'cuda:0', 'cuda:1', 'cuda:2', 'cuda:3']:
-            if not quiet:
-                print('Warning: CUDA device specified but not available, using CPU instead.')
-            providers = ['CPUExecutionProvider']
-    
-    return providers
- 
+    user_set: None (auto), 'cpu', 'cuda', 'cuda:N', or 'mps'/'coreml' (macOS).
+    Returns a list of providers in priority order, always ending with CPU.
+    """
+    def log(msg):
+        if not quiet:
+            print(msg)
+
+    available = ort.get_available_providers()
+    has_cuda = 'CUDAExecutionProvider' in available
+    has_coreml = 'CoreMLExecutionProvider' in available
+    cpu = ['CPUExecutionProvider']
+
+    choice = user_set.lower().strip() if isinstance(user_set, str) else user_set
+
+    # --- explicit CPU ---
+    if choice in ('cpu', 'cpuexecutionprovider'):
+        if has_cuda or has_coreml:
+            log('GPU is available but CPU was set by user.')
+        return cpu
+
+    # --- explicit CUDA ---
+    if choice in ('cuda', 'cudaexecutionprovider') or (isinstance(choice, str) and choice.startswith('cuda:')):
+        if has_cuda:
+            device_id = 0
+            if ':' in choice:
+                try:
+                    device_id = int(choice.split(':')[-1])
+                except ValueError:
+                    log(f'Invalid CUDA device "{user_set}", using device 0.')
+            log(f'Attempting to use CUDA device: {device_id}')
+            return [('CUDAExecutionProvider', {'device_id': device_id}), *cpu]
+        log('Warning: CUDA device specified but not available, using CPU instead.')
+        return cpu
+
+    # --- explicit Apple (MPS is the PyTorch name; ONNX Runtime uses CoreML) ---
+    if choice in ('mps', 'coreml', 'coremlexecutionprovider'):
+        if has_coreml:
+            log('Attempting to use CoreML.')
+            return ['CoreMLExecutionProvider', *cpu]
+        log('Warning: CoreML specified but not available, using CPU instead.')
+        return cpu
+
+    # --- unknown user input ---
+    if choice is not None:
+        log(f'User-specified device "{user_set}" unknown, selecting automatically.')
+
+    # --- automatic selection: CUDA > CoreML > CPU ---
+    if has_cuda:
+        log('Using available CUDA device.')
+        return ['CUDAExecutionProvider', *cpu]
+    if has_coreml:
+        log('Using available CoreML device.')
+        return ['CoreMLExecutionProvider', *cpu]
+
+    log('No GPU available, using CPU.')
+    return cpu
+
+
 # ==============================================================================
 # FRAME SELECTION
 # ==============================================================================
