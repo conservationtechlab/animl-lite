@@ -217,51 +217,72 @@ def test_sequence_calculation_input_validation(station_col, maxdiff, exc):
     with pytest.raises(exc):
         file_management.sequence_calculation(manifest, station_col=station_col, maxdiff=maxdiff)
 
-@pytest.mark.skip(reason="Skipping this test for now")
-def test_manifest_generator_len_and_item(tmp_path: Path):
+
+def test_manifest_generator_len_and_batches(tmp_path: Path):
+    """Test that ManifestGenerator correctly reports batch count and yields batches."""
     img = tmp_path / "img.jpg"
     from PIL import Image
 
     Image.new("RGB", (20, 10), color=(100, 50, 10)).save(img)
     df = pd.DataFrame({"filepath": [str(img)]})
-    gen = ManifestGenerator(df, crop=False, resize_height=16, resize_width=16)
+    gen = ManifestGenerator(df, crop=False, resize_height=16, resize_width=16, batch_size=1)
+    
+    # __len__ returns number of batches
     assert len(gen) == 1
-    item = gen[0]
-    assert item is not None
-    img_arr, path, frame, hw = item
-    assert img_arr.shape == (3, 16, 16)
-    assert path == str(img)
-    assert frame == 0
-    assert hw.tolist() == [10, 20]
+    
+    # Iterate and get first batch
+    batch = next(iter(gen))
+    assert batch is not None
+    
+    batch_images, batch_filepaths, batch_frames, batch_hw = batch
+    assert batch_images.shape == (1, 3, 16, 16)  # (B, C, H, W)
+    assert batch_filepaths == [str(img)]
+    assert batch_frames[0] == 0
+    assert batch_hw[0].tolist() == [10, 20]  # [height, width]
 
-@pytest.mark.skip(reason="Skipping this test for now")
+
 def test_manifest_generator_requires_bbox_when_crop_true(tmp_path: Path):
+    """Test that cropping without bbox columns disables cropping instead of raising."""
     img = tmp_path / "img.jpg"
     from PIL import Image
 
     Image.new("RGB", (20, 10), color=(0, 0, 0)).save(img)
     df = pd.DataFrame({"filepath": [str(img)]})
-    with pytest.raises(ValueError):
-        ManifestGenerator(df, crop=True)
+    
+    # Should not raise; instead it disables cropping and prints a message
+    gen = ManifestGenerator(df, crop=True)
+    assert gen.crop is False
 
 
 def test_manifest_generator_invalid_crop_coord(tmp_path: Path):
+    """Test that invalid crop_coord raises ValueError."""
     img = tmp_path / "img.jpg"
     from PIL import Image
 
     Image.new("RGB", (20, 10), color=(0, 0, 0)).save(img)
-    df = pd.DataFrame({"filepath": [str(img)], "bbox_x": [0], "bbox_y": [0], "bbox_w": [1], "bbox_h": [1]})
-    with pytest.raises(ValueError):
+    df = pd.DataFrame({
+        "filepath": [str(img)], 
+        "bbox_x": [0], 
+        "bbox_y": [0], 
+        "bbox_w": [1], 
+        "bbox_h": [1]
+    })
+    
+    with pytest.raises(ValueError, match="crop_coord must be 'relative' or 'absolute'"):
         ManifestGenerator(df, crop=True, crop_coord="bad")
 
-@pytest.mark.skip(reason="Skipping this test for now")
+
 def test_manifest_dataloader_yields_batches(tmp_path: Path):
+    """Test that ManifestGenerator yields properly formatted batches."""
     img = tmp_path / "img.jpg"
     from PIL import Image
 
     Image.new("RGB", (20, 10), color=(0, 0, 0)).save(img)
     df = pd.DataFrame({"filepath": [str(img)]})
-    loader = ManifestGenerator(df, crop=False, resize_height=8, resize_width=8)
-    batch = next(loader)
-    assert batch[0].shape == (1, 3, 8, 8)
-    assert batch[1] == [str(img)]
+    loader = ManifestGenerator(df, crop=False, resize_height=8, resize_width=8, batch_size=1)
+    
+    batch = next(iter(loader))
+    batch_images, batch_filepaths, batch_frames, batch_hw = batch
+    
+    assert batch_images.shape == (1, 3, 8, 8)  # (B, C, H, W)
+    assert batch_filepaths == [str(img)]
