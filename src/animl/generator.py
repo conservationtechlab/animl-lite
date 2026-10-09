@@ -8,8 +8,6 @@ so the module can be used without requiring PyTorch at runtime.
 Images are returned as numpy arrays (C, H, W) with dtype float32 and
 values scaled to [0, 1]. Batching is provided by a simple Python generator.
 """
-from venv import logger
-
 import cv2
 import numpy as np
 from typing import Tuple, Optional, Sequence, Generator
@@ -19,7 +17,6 @@ from PIL import Image, ImageFile, ImageOps
 from collections import deque
 import threading
 import queue
-from concurrent.futures import ThreadPoolExecutor
 
 from animl.file_management import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from animl.utils.general import SDZWA_CLASSIFIER_SIZE
