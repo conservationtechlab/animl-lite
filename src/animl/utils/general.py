@@ -132,7 +132,7 @@ def _aspect_score(bbox_w, bbox_h, image_width, image_height, mode="wide"):
 
 
 def _frame_score(conf, bbox_w, bbox_h, clarity, image_width, image_height,
-                 aspect_mode="wide", weights=None):
+                 aspect_mode="none", weights=None):
     """
     Weighted score used to pick the best frames of a video.
 
@@ -141,10 +141,20 @@ def _frame_score(conf, bbox_w, bbox_h, clarity, image_width, image_height,
         bbox_w, bbox_h (float): normalized box size relative to the original image
         clarity (float): crop clarity in [0, 1] (see _crop_clarity)
         image_width, image_height (int): original image size in pixels
-        aspect_mode (str): 'wide', 'tall' or 'none' (see _aspect_score)
+        aspect_mode (str): 'none' (default, species-neutral), 'wide' or 'tall' (see _aspect_score)
         weights (dict): keys conf, area, aspect, clarity; defaults to SCORE_WEIGHTS
+
+    With aspect_mode='none' the aspect weight is dropped and the other weights are
+    rescaled to sum to 1, so scores keep the same 0-1 range.
     """
+    if aspect_mode not in ASPECT_MODES:
+        raise ValueError(f"aspect_mode must be one of {ASPECT_MODES}, got '{aspect_mode}'")
     w = SCORE_WEIGHTS if weights is None else weights
+    if aspect_mode == "none":
+        total = w['conf'] + w['area'] + w['clarity']
+        return (w['conf'] * conf
+                + w['area'] * bbox_w * bbox_h
+                + w['clarity'] * clarity) / total
     return (w['conf'] * conf
             + w['area'] * bbox_w * bbox_h
             + w['aspect'] * _aspect_score(bbox_w, bbox_h, image_width, image_height, aspect_mode)

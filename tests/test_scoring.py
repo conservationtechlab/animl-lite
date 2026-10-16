@@ -120,6 +120,30 @@ def test_aspect_mode_changes_score_for_a_wide_box():
     assert _frame_score(*args, aspect_mode="none") < _frame_score(*args, aspect_mode="wide")
 
 
+def test_default_aspect_is_neutral():
+    wide = _frame_score(0.9, 0.4, 0.2, 0.5, 1000, 1000)
+    tall = _frame_score(0.9, 0.2, 0.4, 0.5, 1000, 1000)
+    assert wide == pytest.approx(tall)
+
+
+def test_none_mode_rescales_weights_to_full_range():
+    assert _frame_score(1.0, 1.0, 1.0, 1.0, 1000, 1000, aspect_mode="none") == pytest.approx(1.0)
+
+
+def test_frame_score_rejects_bad_aspect_mode():
+    with pytest.raises(ValueError):
+        _frame_score(0.9, 0.4, 0.2, 0.5, 1000, 1000, aspect_mode="sideways")
+
+
+def test_convert_detections_default_is_neutral():
+    pred, batch = _batch()
+    default = _convert_detections(pred, batch, letterbox=False, calculate_clarity=True)[0]['detections'][0]['score']
+    pred, batch = _batch()
+    none = _convert_detections(pred, batch, letterbox=False, calculate_clarity=True,
+                               aspect_mode="none")[0]['detections'][0]['score']
+    assert default == pytest.approx(none)
+
+
 # ---------------------------------------------------------------------------
 # _convert_detections end to end (clarity + score)
 # ---------------------------------------------------------------------------
