@@ -39,7 +39,7 @@ def test_aspect_tall_rewards_tall_boxes():
 
 
 def test_aspect_none_is_zero():
-    assert _aspect_score(0.4, 0.2, 1000, 1000, "none") == 0.0
+    assert _aspect_score(0.4, 0.2, 1000, 1000, None) == 0.0
 
 
 def test_aspect_is_capped_at_one():
@@ -117,7 +117,7 @@ def test_custom_weights_are_used():
 def test_aspect_mode_changes_score_for_a_wide_box():
     args = (0.9, 0.4, 0.2, 0.5, 1000, 1000)
     assert _frame_score(*args, aspect_mode="wide") > _frame_score(*args, aspect_mode="tall")
-    assert _frame_score(*args, aspect_mode="none") < _frame_score(*args, aspect_mode="wide")
+    assert _frame_score(*args, aspect_mode=None) < _frame_score(*args, aspect_mode="wide")
 
 
 def test_default_aspect_is_neutral():
@@ -127,7 +127,7 @@ def test_default_aspect_is_neutral():
 
 
 def test_none_mode_rescales_weights_to_full_range():
-    assert _frame_score(1.0, 1.0, 1.0, 1.0, 1000, 1000, aspect_mode="none") == pytest.approx(1.0)
+    assert _frame_score(1.0, 1.0, 1.0, 1.0, 1000, 1000, aspect_mode=None) == pytest.approx(1.0)
 
 
 def test_frame_score_rejects_bad_aspect_mode():
@@ -140,8 +140,14 @@ def test_convert_detections_default_is_neutral():
     default = _convert_detections(pred, batch, letterbox=False, calculate_clarity=True)[0]['detections'][0]['score']
     pred, batch = _batch()
     none = _convert_detections(pred, batch, letterbox=False, calculate_clarity=True,
-                               aspect_mode="none")[0]['detections'][0]['score']
+                               aspect_mode=None)[0]['detections'][0]['score']
     assert default == pytest.approx(none)
+
+
+def test_string_none_is_still_accepted():
+    args = (0.9, 0.4, 0.2, 0.5, 1000, 1000)
+    assert _frame_score(*args, aspect_mode="none") == pytest.approx(_frame_score(*args, aspect_mode=None))
+    assert _aspect_score(0.4, 0.2, 1000, 1000, "none") == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -186,4 +192,4 @@ def test_convert_detections_rejects_bad_aspect_mode():
 
 
 def test_aspect_modes_constant():
-    assert set(ASPECT_MODES) == {"wide", "tall", "none"}
+    assert set(ASPECT_MODES) == {"wide", "tall"}  # None means no preference

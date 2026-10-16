@@ -85,7 +85,16 @@ def _laplacian_variance(image):
 # leopard videos (issue #20): confidence barely varies between a good and a bad frame, so it gets a
 # small weight; box size and the sharpness of the animal itself do most of the work.
 SCORE_WEIGHTS = {'conf': 0.10, 'area': 0.55, 'aspect': 0.10, 'clarity': 0.25}
-ASPECT_MODES = ("wide", "tall", "none")
+ASPECT_MODES = ("wide", "tall")  # aspect_mode=None means no aspect-ratio preference
+
+
+def _normalize_aspect_mode(mode):
+    """Return 'wide', 'tall' or None. None (and the string 'none', for backwards compatibility) means no preference."""
+    if mode is None or (isinstance(mode, str) and mode.lower() == "none"):
+        return None
+    if mode not in ASPECT_MODES:
+        raise ValueError(f"aspect_mode must be None or one of {ASPECT_MODES}, got '{mode}'")
+    return mode
 
 
 def _crop_clarity(image, bbox):
@@ -116,12 +125,11 @@ def _aspect_score(bbox_w, bbox_h, image_width, image_height, mode="wide"):
 
     mode 'wide': width / height  (e.g. a leopard seen from the side)
     mode 'tall': height / width  (e.g. a giraffe, or a bear standing up)
-    mode 'none': 0.0 (aspect ratio is ignored)
+    mode None:   0.0 (aspect ratio is ignored)
     A ratio of 2:1 or more in the chosen direction gets the full score of 1.0.
     """
-    if mode not in ASPECT_MODES:
-        raise ValueError(f"aspect_mode must be one of {ASPECT_MODES}, got '{mode}'")
-    if mode == "none":
+    mode = _normalize_aspect_mode(mode)
+    if mode is None:
         return 0.0
     w_px = bbox_w * image_width
     h_px = bbox_h * image_height
@@ -132,7 +140,7 @@ def _aspect_score(bbox_w, bbox_h, image_width, image_height, mode="wide"):
 
 
 def _frame_score(conf, bbox_w, bbox_h, clarity, image_width, image_height,
-                 aspect_mode="none", weights=None):
+                 aspect_mode=None, weights=None):
     """
     Weighted score used to pick the best frames of a video.
 
@@ -141,16 +149,15 @@ def _frame_score(conf, bbox_w, bbox_h, clarity, image_width, image_height,
         bbox_w, bbox_h (float): normalized box size relative to the original image
         clarity (float): crop clarity in [0, 1] (see _crop_clarity)
         image_width, image_height (int): original image size in pixels
-        aspect_mode (str): 'none' (default, species-neutral), 'wide' or 'tall' (see _aspect_score)
+        aspect_mode (str): None (default, species-neutral), 'wide' or 'tall' (see _aspect_score)
         weights (dict): keys conf, area, aspect, clarity; defaults to SCORE_WEIGHTS
 
-    With aspect_mode='none' the aspect weight is dropped and the other weights are
+    With aspect_mode=None the aspect weight is dropped and the other weights are
     rescaled to sum to 1, so scores keep the same 0-1 range.
     """
-    if aspect_mode not in ASPECT_MODES:
-        raise ValueError(f"aspect_mode must be one of {ASPECT_MODES}, got '{aspect_mode}'")
+    aspect_mode = _normalize_aspect_mode(aspect_mode)
     w = SCORE_WEIGHTS if weights is None else weights
-    if aspect_mode == "none":
+    if aspect_mode is None:
         total = w['conf'] + w['area'] + w['clarity']
         return (w['conf'] * conf
                 + w['area'] * bbox_w * bbox_h

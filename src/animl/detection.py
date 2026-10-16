@@ -17,7 +17,7 @@ import onnxruntime as ort
 from animl import file_management
 from animl.generator import ManifestGenerator
 from animl.utils.general import (_normalize_boxes, _xyxy2xywh, _scale_letterbox, get_onnx_device,
-                                 _crop_clarity, _frame_score, ASPECT_MODES)
+                                 _crop_clarity, _frame_score, _normalize_aspect_mode)
 from animl.utils.visualization import MD_LABELS
 
 
@@ -51,7 +51,7 @@ def detect(detector,
            category_map: Optional[dict] = MD_LABELS,
            confidence_threshold: float = 0.1,
            calculate_clarity: bool = False,
-           aspect_mode: str = 'none',
+           aspect_mode: Optional[str] = None,
            score_weights: Optional[dict] = None,
            batch_size: int = 8,
            prefetch_size: int = 2,
@@ -73,7 +73,7 @@ def detect(detector,
         confidence_threshold (float): only detections above this threshold are returned
         calculate_clarity (bool): if True, calculate the clarity of each detected animal (Laplacian variance of its
                                     bounding-box crop) and a frame score used to pick the best frames of a video
-        aspect_mode (str): aspect-ratio preference in the frame score. Defaults to 'none' so detection stays
+        aspect_mode (str): aspect-ratio preference in the frame score. Defaults to None so detection stays
                                     species-neutral; callers that know the target species can set 'wide'
                                     (animals wider than tall) or 'tall' (animals taller than wide)
         score_weights (dict): weights for the frame score with keys conf, area, aspect and clarity
@@ -219,7 +219,7 @@ def _convert_detections(predictions: list,
                         model_type: str = 'megadetector',
                         category_map: dict = MD_LABELS,
                         calculate_clarity=False,
-                        aspect_mode: str = 'none',
+                        aspect_mode: Optional[str] = None,
                         score_weights: Optional[dict] = None) -> pd.DataFrame:
     # Converts output into nested list with categories, conf, and bboxes in expected format for parsing function.
     # Supports YOLOv5/MDv5, YOLOv6+, and ONNX models with either relative or absolute bounding box outputs.
@@ -237,8 +237,7 @@ def _convert_detections(predictions: list,
               "This may lead to incorrect category labels if using a custom model.")
         category_map = MD_LABELS
 
-    if aspect_mode not in ASPECT_MODES:
-        raise ValueError(f"aspect_mode must be one of {ASPECT_MODES}, got '{aspect_mode}'")
+    aspect_mode = _normalize_aspect_mode(aspect_mode)
 
     results = []
 
