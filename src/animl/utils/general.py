@@ -80,6 +80,76 @@ def _laplacian_variance(image):
     
     return laplacian.var()
 
+
+# Weights for the frame score (must sum to 1). Chosen by comparing scoring options on hand-checked
+# leopard videos (issue #20): confidence barely varies between a good and a bad frame, so it gets a
+# small weight; box size and the sharpness of the animal itself do most of the work.
+SCORE_WEIGHTS = {'conf': 0.10, 'area': 0.55, 'aspect': 0.10, 'clarity': 0.25}
+ASPECT_MODES = ("wide", "tall", "none")
+
+
+def _crop_clarity(image, bbox):
+    """
+    Sharpness of the animal only: Laplacian variance of the bounding-box crop, scaled to [0, 1].
+
+    Args:
+        image (np.ndarray): H x W x C image the bbox refers to
+        bbox (array-like): normalized (x_corner, y_corner, width, height) relative to `image`
+
+    Returns:
+        float: min(laplacian_variance / 500, 1.0); 0.0 if the crop is empty
+    """
+    height, width = image.shape[:2]
+    x0 = int(np.clip(round(bbox[0] * width), 0, width))
+    y0 = int(np.clip(round(bbox[1] * height), 0, height))
+    x1 = int(np.clip(round((bbox[0] + bbox[2]) * width), 0, width))
+    y1 = int(np.clip(round((bbox[1] + bbox[3]) * height), 0, height))
+    if x1 - x0 < 2 or y1 - y0 < 2:
+        return 0.0
+    return min(float(_laplacian_variance(image[y0:y1, x0:x1])) / 500, 1.0)
+
+
+def _aspect_score(bbox_w, bbox_h, image_width, image_height, mode="wide"):
+    """
+    Rewards boxes with the preferred orientation, measured in PIXELS (stored boxes are
+    normalized, which distorts the ratio on a non-square image).
+
+    mode 'wide': width / height  (e.g. a leopard seen from the side)
+    mode 'tall': height / width  (e.g. a giraffe, or a bear standing up)
+    mode 'none': 0.0 (aspect ratio is ignored)
+    A ratio of 2:1 or more in the chosen direction gets the full score of 1.0.
+    """
+    if mode not in ASPECT_MODES:
+        raise ValueError(f"aspect_mode must be one of {ASPECT_MODES}, got '{mode}'")
+    if mode == "none":
+        return 0.0
+    w_px = bbox_w * image_width
+    h_px = bbox_h * image_height
+    if w_px <= 0 or h_px <= 0:
+        return 0.0
+    ratio = w_px / h_px if mode == "wide" else h_px / w_px
+    return min(ratio / 2.0, 1.0)
+
+
+def _frame_score(conf, bbox_w, bbox_h, clarity, image_width, image_height,
+                 aspect_mode="wide", weights=None):
+    """
+    Weighted score used to pick the best frames of a video.
+
+    Args:
+        conf (float): detection confidence
+        bbox_w, bbox_h (float): normalized box size relative to the original image
+        clarity (float): crop clarity in [0, 1] (see _crop_clarity)
+        image_width, image_height (int): original image size in pixels
+        aspect_mode (str): 'wide', 'tall' or 'none' (see _aspect_score)
+        weights (dict): keys conf, area, aspect, clarity; defaults to SCORE_WEIGHTS
+    """
+    w = SCORE_WEIGHTS if weights is None else weights
+    return (w['conf'] * conf
+            + w['area'] * bbox_w * bbox_h
+            + w['aspect'] * _aspect_score(bbox_w, bbox_h, image_width, image_height, aspect_mode)
+            + w['clarity'] * clarity)
+
 # ==============================================================================
 # COORDINATE CONVERSION
 # ==============================================================================
