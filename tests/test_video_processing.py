@@ -52,3 +52,27 @@ class TestParallel:
         frames = _frames(files, parallel=True, num_workers=4)
         assert time.time() - start < 1.5
         assert frames["filepath"].tolist() == files
+
+
+class TestFrameSelection:
+    def _selected(self, path, **kwargs):
+        return [frame for _, frame in video_processing._count_frames(path, **kwargs)]
+
+    def test_video_shorter_than_a_second_gets_a_frame(self, tmp_path):
+        """The duration was truncated to whole seconds, so short clips got no frames"""
+        assert self._selected(_video(tmp_path / "short.mp4", 7, fps=10), fps=1) == [0]
+
+    def test_whole_duration_is_sampled(self, tmp_path):
+        """A 2.5 s clip at 1 fps lost its last half second"""
+        assert self._selected(_video(tmp_path / "clip.mp4", 25, fps=10), fps=1) == [0, 10, 20]
+
+    def test_no_repeated_frames_when_sampling_faster_than_the_video(self, tmp_path):
+        frames = self._selected(_video(tmp_path / "clip.mp4", 10, fps=5), fps=12)
+        assert frames == sorted(set(frames))
+
+    def test_no_repeated_frames_when_asking_for_more_than_the_video_has(self, tmp_path):
+        """increment was 0, so frame 0 was returned for every requested frame"""
+        assert self._selected(_video(tmp_path / "clip.mp4", 3), frames=5) == [0, 1, 2]
+
+    def test_frames_spread_as_before(self, tmp_path):
+        assert self._selected(_video(tmp_path / "clip.mp4", 100), frames=3) == [0, 33, 66]

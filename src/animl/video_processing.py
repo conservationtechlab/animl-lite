@@ -2,6 +2,7 @@
 Video Processing Functions
 
 """
+import math
 import os
 import cv2
 import subprocess
@@ -139,43 +140,41 @@ def _count_frames(filepath, frames=5, fps=None) -> int:
         raise FileNotFoundError(f"Video file {filepath} does not exist")
 
     cap = cv2.VideoCapture(filepath)
-    if not cap.isOpened():  # corrupted video
-        return None
+    try:
+        if not cap.isOpened():  # corrupted video
+            return None
 
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    if frame_count == 0:
-        # print(f"Video file {filepath} has 0 frames, skipping.")
-        return None
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if frame_count <= 0:
+            # print(f"Video file {filepath} has 0 frames, skipping.")
+            return None
 
-    frames_saved = []
-    frame_capture = 0
+        # select by fps
+        if fps is not None:
+            video_fps = cap.get(cv2.CAP_PROP_FPS)
+            if video_fps == 0:
+                # Attempt to get FPS using ffmpeg if OpenCV fails
+                video_fps = get_fps_from_ffmpeg(filepath)
+                if video_fps is None:
+                    print("Could not determine video FPS, defaulting to 30 FPS.")
+                    video_fps = 30  # Default to 30 if unable to determine
 
-    # select by fps
-    if fps is not None:
-        video_fps = cap.get(cv2.CAP_PROP_FPS)
-        if video_fps == 0:
-            # Attempt to get FPS using ffmpeg if OpenCV fails
-            video_fps = get_fps_from_ffmpeg(filepath)
-            if video_fps is None:
-                print("Could not determine video FPS, defaulting to 30 FPS.")
-                video_fps = 30  # Default to 30 if unable to determine
+            # sample the whole duration, rounded up: videos shorter than a second still get a frame
+            n_frames = max(1, math.ceil(round(frame_count / video_fps * fps, 6)))
+            sampled_times = [i / fps for i in range(n_frames)]
+            selected = [min(int(round(t * video_fps)), frame_count - 1) for t in sampled_times]
 
-        n_frames = int(frame_count / video_fps) * fps
-        sampled_times = [i / fps for i in range(n_frames)]
-        frames_saved = [min(int(round(t * video_fps)), frame_count-1) for t in sampled_times]
-        frames_saved = [[str(filepath), frame] for frame in frames_saved]
+        # select set number of frames
+        else:
+            # no more frames than the video has, so none are repeated
+            n_frames = min(frames, frame_count)
+            increment = frame_count // n_frames
+            selected = [i * increment for i in range(n_frames)]
+    finally:
+        cap.release()
 
-    # select set number of frames
-    else:
-        increment = int(frame_count / frames)
-        while len(frames_saved) < frames:
-            frames_saved.append([str(filepath), frame_capture])
-            frame_capture += increment
-
-    cap.release()
-    cv2.destroyAllWindows()
-
-    return frames_saved
+    # sampling faster than the video's frame rate selects some frames twice
+    return [[str(filepath), frame] for frame in dict.fromkeys(selected)]
 
 
 # get specific frame of video as QImage
