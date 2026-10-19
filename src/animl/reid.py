@@ -12,7 +12,7 @@ import numpy as np
 import onnxruntime as ort
 
 from animl.utils.general import get_onnx_device
-from animl.generator import ManifestGenerator
+from animl.generator import ManifestGenerator, predict_by_row
 
 
 MIEWID_SIZE = 440
@@ -66,7 +66,7 @@ def extract_reid_embeddings(model,
         quiet (bool): if True, suppress the progress bar
 
     Returns:
-        output (np.ndarray): array of extracted embeddings
+        output (np.ndarray): one embedding per manifest row, NaN where the image couldn't be loaded
     """
     if not {file_col}.issubset(manifest.columns):
         raise ValueError(f"DataFrame must contain '{file_col}' column.")
@@ -83,11 +83,9 @@ def extract_reid_embeddings(model,
                                        batch_size=batch_size,
                                        prefetch_size=prefetch_size,
                                        num_workers=num_workers,
-                                       quiet=quiet)
-        for batch_images, _, _, _ in dataloader:
-            outputs = model.run(None, {model.get_inputs()[0].name: batch_images})
-            output.extend(outputs)
-        output = np.vstack(output)
+                                       quiet=quiet,
+                                       return_indices=True)
+        output = predict_by_row(model, dataloader)
     return output
 
 
