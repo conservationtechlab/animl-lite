@@ -253,7 +253,8 @@ def _convert_detections(predictions: list,
 
                 bbox = _normalize_boxes(boxes[j], image_tensors[i].shape[1:])
                 bbox = _xyxy2xywh(bbox)
-                if bbox.all() == 0:
+                # skip empty boxes; x or y is 0 for boxes touching the left or top edge
+                if bbox[2] <= 0 or bbox[3] <= 0:
                     continue
 
                 if letterbox:
