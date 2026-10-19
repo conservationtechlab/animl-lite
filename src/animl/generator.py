@@ -263,21 +263,16 @@ class ManifestGenerator:
             
             width, height = img.size
             
-            # Maintain aspect ratio if one dimension is zero
-            if self.resize_width > 0 and self.resize_height <= 0:
-                self.resize_height = int(width / height * self.resize_width)
-            elif self.resize_width <= 0 and self.resize_height > 0:
-                self.resize_width = int(height / width * self.resize_height)
-            
             # Cropping if requested
             if self.crop:
                 img = self._apply_crop(img, row, width, height)
             
             # Resizing
+            target_w, target_h = self._target_size(*img.size)
             if self.letterbox:
-                img = self._letterbox_resize(img)
+                img = self._letterbox_resize(img, target_w, target_h)
             else:
-                img = img.resize((self.resize_width, self.resize_height), Image.BILINEAR)
+                img = img.resize((target_w, target_h), Image.BILINEAR)
             
             # Convert to numpy array
             img_arr = self._pil_to_numpy(img)
@@ -346,10 +341,27 @@ class ManifestGenerator:
         
         return img.crop((left, top, right, bottom))
     
-    def _letterbox_resize(self, img: Image.Image) -> Image.Image:
+    def _target_size(self, width: int, height: int) -> Tuple[int, int]:
+        '''
+        Output size for an image of the given size
+
+        If one of resize_width / resize_height is 0 or less, it follows the image's
+        aspect ratio. Images of different aspect ratios then get different sizes,
+        which can only be batched with batch_size=1.
+        '''
+        if self.resize_width > 0 and self.resize_height <= 0:
+            return self.resize_width, max(1, round(self.resize_width * height / width))
+        if self.resize_width <= 0 and self.resize_height > 0:
+            return max(1, round(self.resize_height * width / height)), self.resize_height
+        return self.resize_width, self.resize_height
+
+    def _letterbox_resize(self, img: Image.Image,
+                          target_w: Optional[int] = None,
+                          target_h: Optional[int] = None) -> Image.Image:
         '''Resize with letterboxing to maintain aspect ratio.'''
         width, height = img.size
-        target_w, target_h = self.resize_width, self.resize_height
+        target_w = self.resize_width if target_w is None else target_w
+        target_h = self.resize_height if target_h is None else target_h
         
         if round((width / height), 2) == round((target_w / target_h), 2):
             return img.resize((target_w, target_h), Image.BILINEAR)

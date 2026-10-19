@@ -10,10 +10,10 @@ from PIL import Image
 from animl.generator import ManifestGenerator
 
 
-def _images(tmp_path: Path, n: int, size=(20, 10)) -> pd.DataFrame:
+def _images(tmp_path: Path, n: int, size=(20, 10), prefix="img") -> pd.DataFrame:
     paths = []
     for i in range(n):
-        path = tmp_path / f"img_{i}.jpg"
+        path = tmp_path / f"{prefix}_{i}.jpg"
         Image.new("RGB", size, color=(i * 20, 0, 0)).save(path)
         paths.append(str(path))
     return pd.DataFrame({"filepath": paths})
@@ -83,3 +83,25 @@ class TestReturnIndices:
     def test_four_items_by_default(self, tmp_path):
         (batch,) = list(_generator(_images(tmp_path, 2), num_workers=0))
         assert len(batch) == 4
+
+
+class TestResize:
+    @pytest.mark.parametrize("size,expected", [((40, 10), (3, 4, 16)), ((10, 40), (3, 64, 16))])
+    def test_height_follows_aspect_ratio(self, tmp_path, size, expected):
+        """The height was computed with the ratio inverted"""
+        gen = _generator(_images(tmp_path, 1, size=size), num_workers=0, resize_width=16, resize_height=0)
+        (batch,) = list(gen)
+        assert batch[0].shape[1:] == expected
+
+    def test_width_follows_aspect_ratio(self, tmp_path):
+        gen = _generator(_images(tmp_path, 1, size=(40, 10)), num_workers=0, resize_width=0, resize_height=4)
+        (batch,) = list(gen)
+        assert batch[0].shape[1:] == (3, 4, 16)
+
+    def test_size_is_computed_per_image(self, tmp_path):
+        """The first image's size was stored on the generator and reused for every image"""
+        wide = _images(tmp_path, 1, size=(40, 10), prefix="wide")
+        tall = _images(tmp_path, 1, size=(10, 40), prefix="tall")
+        gen = _generator(pd.concat([wide, tall]), num_workers=0, batch_size=1, resize_width=16, resize_height=0)
+        assert [b[0].shape[2] for b in gen] == [4, 64]
+        assert (gen.resize_width, gen.resize_height) == (16, 0)
