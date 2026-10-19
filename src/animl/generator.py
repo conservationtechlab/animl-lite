@@ -33,6 +33,40 @@ class _WorkerError:
         self.error = error
 
 
+def predict_by_row(model, dataset: "ManifestGenerator", transform=None) -> np.ndarray:
+    '''
+    Run an ONNX model over a ManifestGenerator, one output row per manifest row
+
+    Items that can't be loaded are left out of their batch, so results are placed
+    by the manifest indices of each batch; rows of items that couldn't be loaded
+    are NaN.
+
+    Args:
+        model: onnxruntime session
+        dataset (ManifestGenerator): generator built with return_indices=True
+        transform (callable): applied to each batch's output, e.g. softmax
+
+    Returns:
+        np.ndarray of shape (len(manifest), output size)
+    '''
+    if not dataset.return_indices:
+        raise ValueError("predict_by_row needs a ManifestGenerator with return_indices=True")
+    result = None
+    for batch_images, _, _, _, indices in dataset:
+        output = model.run(None, {model.get_inputs()[0].name: batch_images})[0]
+        if transform is not None:
+            output = transform(output)
+        output = output.reshape(len(indices), -1)
+        if result is None:
+            dtype = output.dtype if np.issubdtype(output.dtype, np.floating) else np.float64
+            result = np.full((len(dataset.manifest), output.shape[1]), np.nan, dtype=dtype)
+        result[indices] = output
+    if result is None:
+        # nothing could be loaded
+        result = np.full((len(dataset.manifest), 0), np.nan, dtype=np.float32)
+    return result
+
+
 class ManifestGenerator:
     '''
     Data generator that crops images on the fly, requires relative bbox coordinates,

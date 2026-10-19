@@ -101,13 +101,10 @@ def classify(model,
         out_file (str): path to save prediction results to
 
     Returns:
-        detections (pd.DataFrame): MD detections with classifier prediction and confidence
+        np.ndarray: softmaxed predictions, one row per detection (NaN where the image couldn't be loaded)
     """
     if file_management.check_file(out_file, output_type="Classification results"):
         return file_management.load_data(out_file).to_numpy()
-
-    # initialize lists
-    raw_output = []
 
     # Manifest
     if isinstance(detections, pd.DataFrame):
@@ -128,7 +125,8 @@ def classify(model,
                                               batch_size=batch_size,
                                               prefetch_size=prefetch_size,
                                               num_workers=num_workers,  # 4 threads for loading
-                                              use_progress_bar=use_progress_bar)
+                                              use_progress_bar=use_progress_bar,
+                                              return_indices=True)
 
     # Single File
     elif isinstance(detections, str):
@@ -143,7 +141,8 @@ def classify(model,
                                               batch_size=batch_size,
                                               prefetch_size=prefetch_size,
                                               num_workers=num_workers,
-                                              use_progress_bar=use_progress_bar)
+                                              use_progress_bar=use_progress_bar,
+                                              return_indices=True)
     # List of Files
     elif isinstance(detections, list):
         detections = pd.DataFrame({file_col: detections, 'frame': 0}, index=range(len(detections)))
@@ -157,25 +156,38 @@ def classify(model,
                                               batch_size=batch_size,
                                               prefetch_size=prefetch_size,
                                               num_workers=num_workers,
-                                              use_progress_bar=use_progress_bar)
+                                              use_progress_bar=use_progress_bar,
+                                              return_indices=True)
     else:
         raise AssertionError("Input must be a data frame of crops, single file path or vector of file paths.")
 
     # Predict
     start_time = time()
-    for batch_images, _, _, _ in dataset:
-        output = model.run(None, {model.get_inputs()[0].name: batch_images})
-        # softmax over each image's classes; output is a list of the model's outputs
-        raw_output.append(softmax(output[0]))
-
-    raw_output = np.vstack(raw_output)
+    # one row per detection, NaN where the image couldn't be loaded;
+    # softmax over each image's classes
+    raw_output = generator.predict_by_row(model, dataset, transform=softmax)
 
     if out_file:
         file_management.save_data(pd.DataFrame(raw_output), out_file)
 
-    print(f"\nFinished classification. Total images processed: {len(raw_output)} at {round(len(raw_output)/(time() - start_time), 1)} img/s.")
+    processed = int((~np.isnan(raw_output).any(axis=1)).sum()) if raw_output.shape[1] else 0
+    if processed < len(raw_output):
+        print(f"Warning: {len(raw_output) - processed} images could not be loaded, their predictions are NaN.")
+    print(f"\nFinished classification. Total images processed: {processed} at {round(processed/(time() - start_time), 1)} img/s.")
 
     return raw_output
+
+
+def _drop_unclassified(animals: pd.DataFrame, predictions_raw):
+    '''Leave out detections whose image couldn't be loaded (NaN rows from classify)'''
+    predictions_raw = np.asarray(predictions_raw, dtype=float)
+    if predictions_raw.ndim != 2 or len(predictions_raw) != len(animals):
+        return animals, predictions_raw
+    loaded = ~np.isnan(predictions_raw).any(axis=1)
+    if not loaded.all():
+        print(f"Warning: {int((~loaded).sum())} detections could not be classified",
+              " and will be excluded from results.")
+    return animals[loaded].reset_index(drop=True), predictions_raw[loaded]
 
 
 def single_classification(animals: pd.DataFrame,
@@ -227,6 +239,7 @@ def single_classification(animals: pd.DataFrame,
                   " and will be excluded from results.")
             animals = animals[~animals[file_col].isin(failed_files)]
         animals = animals.reset_index(drop=True)
+        animals, predictions_raw = _drop_unclassified(animals, predictions_raw)
         animals["prediction"] = [class_list[i] for i in np.argmax(predictions_raw, axis=1)]
         animals["confidence"] = animals["conf"].mul(np.max(predictions_raw, axis=1))
 
@@ -327,6 +340,8 @@ def sequence_classification(animals: pd.DataFrame,
         empty_col = class_list[class_list == empty_class].index[0]
     else:
         empty_col = None
+
+    animals, predictions_raw = _drop_unclassified(animals.reset_index(drop=True), predictions_raw)
 
     if empty is not None or not empty.empty:
         empty["ID"] = range(0, empty.shape[0])

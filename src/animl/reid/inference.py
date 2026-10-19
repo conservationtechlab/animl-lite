@@ -6,11 +6,10 @@ Code to run Miew_ID and other re-identification models
 """
 from typing import Optional
 import pandas as pd
-import numpy as np
 
 
 from animl.utils.general import create_onnx_session, get_onnx_device
-from animl.generator import ManifestGenerator
+from animl.generator import ManifestGenerator, predict_by_row
 
 MIEWID_SIZE = 440
 
@@ -54,7 +53,7 @@ def extract_miew_embeddings(miew_model,
         use_progress_bar (bool): whether to display a progress bar
 
     Returns:
-        output (np.ndarray): array of extracted embeddings
+        output (np.ndarray): one embedding per manifest row, NaN where the image couldn't be loaded
     """
     if not {file_col}.issubset(manifest.columns):
         raise ValueError(f"DataFrame must contain '{file_col}' column.")
@@ -72,9 +71,7 @@ def extract_miew_embeddings(miew_model,
                                        batch_size=batch_size,
                                        prefetch_size=prefetch_size,
                                        num_workers=num_workers,
-                                       use_progress_bar=use_progress_bar)
-        for batch_images, _, _, _ in dataloader:
-            outputs = miew_model.run(None, {miew_model.get_inputs()[0].name: batch_images})
-            output.extend(outputs)
-        output = np.vstack(output)
+                                       use_progress_bar=use_progress_bar,
+                                       return_indices=True)
+        output = predict_by_row(miew_model, dataloader)
     return output
