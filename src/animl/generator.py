@@ -23,6 +23,15 @@ from animl.utils.general import SDZWA_CLASSIFIER_SIZE
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
+# end of the batches, from the prefetch worker
+_END = object()
+
+
+class _WorkerError:
+    '''An exception raised in the prefetch worker, re-raised by the consumer'''
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
 
 class ManifestGenerator:
     '''
@@ -123,59 +132,78 @@ class ManifestGenerator:
     
     def _iter_with_prefetch(self) -> Generator:
         '''Multi-threaded iteration with async prefetching.'''
+        # a fresh queue, so batches left over from an earlier, interrupted iteration aren't yielded
+        self._batch_queue = queue.Queue(maxsize=self.prefetch_size)
         self._stop_event.clear()
         self._prefetch_thread = threading.Thread(
             target=self._prefetch_worker,
             daemon=True
         )
         self._prefetch_thread.start()
-        
+
+        progress = None
+        if self.use_progress_bar:
+            try:
+                from tqdm import tqdm
+                progress = tqdm(total=len(self), desc="Loading batches", unit="batch")
+            except ImportError:
+                pass
+
         try:
-            batch_count = 0
-            iterator = range(len(self))
-            if self.use_progress_bar:
+            while True:
+                # wait as long as the worker is running: a slow batch (large images,
+                # videos, network drives) must not end the iteration early
                 try:
-                    from tqdm import tqdm
-                    iterator = tqdm(iterator, desc="Loading batches", unit="batch")
-                except ImportError:
-                    pass
-            
-            for _ in iterator:
-                try:
-                    batch = self._batch_queue.get(timeout=30)
-                    if batch is None:  # Sentinel for end
-                        break
-                    yield batch
-                    batch_count += 1
+                    batch = self._batch_queue.get(timeout=1)
                 except queue.Empty:
-                    print("Prefetch timeout - worker may be stuck")
+                    if not self._prefetch_thread.is_alive():
+                        raise RuntimeError("Prefetch worker stopped without finishing")
+                    continue
+                if batch is _END:
                     break
+                if isinstance(batch, _WorkerError):
+                    raise batch.error
+                if progress is not None:
+                    progress.update(1)
+                yield batch
         finally:
             self._stop_event.set()
+            if progress is not None:
+                progress.close()
             if self._prefetch_thread:
                 self._prefetch_thread.join(timeout=5)
-    
+
     def _prefetch_worker(self) -> None:
         '''Worker thread that prefetches batches.'''
         try:
             batch_indices = []
             for idx in range(len(self.manifest)):
                 if self._stop_event.is_set():
-                    break
-                
+                    return
+
                 batch_indices.append(idx)
-                
+
                 if len(batch_indices) == self.batch_size or idx == len(self.manifest) - 1:
                     batch = self._load_batch(batch_indices)
-                    if batch is not None:
-                        self._batch_queue.put(batch)
+                    if batch is not None and not self._put(batch):
+                        return
                     batch_indices = []
-            
-            self._batch_queue.put(None)  # Sentinel
+
+            self._put(_END)
         except Exception as e:
-            print(f"Prefetch worker error: {e}")
-            self._batch_queue.put(None)
-    
+            # hand the error to the consumer instead of ending the iteration as if it had finished
+            self._put(_WorkerError(e))
+
+    def _put(self, item) -> bool:
+        '''Queue an item for the consumer; False if the iteration was stopped meanwhile.'''
+        while not self._stop_event.is_set():
+            try:
+                self._batch_queue.put(item, timeout=0.1)
+                return True
+            except queue.Full:
+                continue
+        return False
+
     def _load_batch(self, indices: list) -> Optional[Tuple]:
         '''Load a batch of samples.'''
         batch_images = []
