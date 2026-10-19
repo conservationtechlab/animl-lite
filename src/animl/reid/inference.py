@@ -8,9 +8,8 @@ from typing import Optional
 import pandas as pd
 import numpy as np
 
-import onnxruntime as ort
 
-from animl.utils.general import get_onnx_device
+from animl.utils.general import create_onnx_session, get_onnx_device
 from animl.generator import ManifestGenerator
 
 MIEWID_SIZE = 440
@@ -30,7 +29,7 @@ def load_miew(file_path: str,
     """
     device = get_onnx_device(user_set=device)
     print(f'Sending model to {device}')
-    miew = ort.InferenceSession(file_path, providers=device)
+    miew = create_onnx_session(file_path, device)
     miew.model_type = 'miewid'
     return miew
 

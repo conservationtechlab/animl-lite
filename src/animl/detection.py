@@ -12,11 +12,10 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
-import onnxruntime as ort
 
 from animl import file_management
 from animl.generator import ManifestGenerator
-from animl.utils.general import _normalize_boxes, _xyxy2xywh, _scale_letterbox, get_onnx_device, _laplacian_variance
+from animl.utils.general import _normalize_boxes, _xyxy2xywh, _scale_letterbox, get_onnx_device, _laplacian_variance, create_onnx_session
 from animl.utils.visualization import MD_LABELS
 
 
@@ -36,7 +35,7 @@ def load_detector(model_path: str, model_type: str = "megadetector", device: Opt
         raise FileNotFoundError(f"Model file not found at {model_path}")
 
     providers = get_onnx_device(user_set=device)
-    model = ort.InferenceSession(model_path, providers=providers)
+    model = create_onnx_session(model_path, providers)
     model.model_type = model_type.lower()
     return model
 

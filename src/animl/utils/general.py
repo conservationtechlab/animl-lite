@@ -2,6 +2,8 @@
 General utils
 
 """
+import warnings
+
 import cv2
 import numpy as np
 import onnxruntime as ort
@@ -58,6 +60,28 @@ def get_onnx_device(user_set=None, quiet=False):
         providers = ['CPUExecutionProvider']
        
     return providers
+
+
+def create_onnx_session(model_path, providers):
+    """
+    Create an ONNX Runtime session, warning if CUDA was requested but not used
+
+    ONNX Runtime silently falls back to CPU when CUDA can't be loaded
+    (for example when cuDNN is missing), which makes models run far slower.
+
+    Args:
+        model_path (str | Path): path to the .onnx file
+        providers (list): execution providers, as returned by get_onnx_device
+
+    Returns:
+        onnxruntime.InferenceSession
+    """
+    session = ort.InferenceSession(str(model_path), providers=providers)
+    requested = [p[0] if isinstance(p, tuple) else p for p in providers]
+    if 'CUDAExecutionProvider' in requested and 'CUDAExecutionProvider' not in session.get_providers():
+        warnings.warn(f'CUDA was requested for {model_path} but could not be used, running on CPU. '
+                      'Check that the CUDA and cuDNN versions match onnxruntime-gpu.', RuntimeWarning)
+    return session
  
 # ==============================================================================
 # FRAME SELECTION

@@ -9,10 +9,9 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from time import time
-import onnxruntime
 
 from animl import generator, file_management
-from animl.utils.general import get_onnx_device, softmax
+from animl.utils.general import create_onnx_session, get_onnx_device, softmax
 
 
 def load_classifier(model_path: str,
@@ -37,7 +36,7 @@ def load_classifier(model_path: str,
     providers = get_onnx_device(user_set=device)
 
     print(f'Loading model at {model_path}')
-    model = onnxruntime.InferenceSession(model_path, providers=providers)
+    model = create_onnx_session(model_path, providers)
     model.model_type = "classifier"
 
     # get number of classes
