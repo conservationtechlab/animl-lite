@@ -71,7 +71,9 @@ def test_model_types_contains_expected_values(model):
     "providers,user_set,quiet,expected",
     [
         (["CUDAExecutionProvider", "CPUExecutionProvider"], "cpu", False, ["CPUExecutionProvider"]),
-        (["CUDAExecutionProvider", "CPUExecutionProvider"], "cpu", True, ["CUDAExecutionProvider", "CPUExecutionProvider"]),
+        # choosing cpu must hold whether or not messages are printed
+        (["CUDAExecutionProvider", "CPUExecutionProvider"], "cpu", True, ["CPUExecutionProvider"]),
+        (["CUDAExecutionProvider", "CPUExecutionProvider"], "CPUExecutionProvider", True, ["CPUExecutionProvider"]),
         (
             ["CUDAExecutionProvider", "CPUExecutionProvider"],
             "cuda:1",

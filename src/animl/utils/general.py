@@ -31,7 +31,7 @@ def get_onnx_device(user_set=None, quiet=False):
         if user_set in ['cpu', 'CPUExecutionProvider']:
             if not quiet:
                 print('CUDA is available but set to cpu by user.')
-                providers = ['CPUExecutionProvider']
+            providers = ['CPUExecutionProvider']
         # user selects cuda device and is available
         elif user_set in ['CUDAExecutionProvider', 'cuda', 'cuda:0', 'cuda:1', 'cuda:2', 'cuda:3']:
             device_number = int(user_set.split(':')[-1]) if ':' in user_set else 0
