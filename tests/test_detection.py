@@ -106,3 +106,46 @@ class TestInputs:
         results = _detect(detector, [first, second], checkpoint_path=checkpoint)
         assert sorted(r["filepath"] for r in results) == [first, second]
         assert calls == [1]   # only the new image is detected
+
+
+class FirstImageOnlyDetector(FakeDetector):
+    """Like the MDv1000 export: in a batch, only the first image gets detections"""
+
+    def __init__(self, boxes):
+        super().__init__(boxes)
+        self.batch_sizes = []
+
+    def run(self, names, feed):
+        self.batch_sizes.append(len(feed["images"]))
+        output = super().run(names, feed)[0].copy()
+        output[1:] = 0
+        return [output]
+
+
+class CountingDetector(FakeDetector):
+    def __init__(self, boxes):
+        super().__init__(boxes)
+        self.batch_sizes = []
+
+    def run(self, names, feed):
+        self.batch_sizes.append(len(feed["images"]))
+        return super().run(names, feed)
+
+
+class TestBatches:
+    BOX = [[300, 300, 700, 700, 0.8, 0]]
+
+    def _files(self, tmp_path, n):
+        return [_image(tmp_path, f"img_{i}.jpg") for i in range(n)]
+
+    def test_every_image_detected_when_the_model_only_answers_for_the_first(self, tmp_path):
+        """Images after the first in each batch came back empty"""
+        detector = FirstImageOnlyDetector(self.BOX)
+        results = _detect(detector, self._files(tmp_path, 5), batch_size=3)
+        assert [len(r["detections"]) for r in results] == [1] * 5
+
+    def test_batches_kept_when_the_model_batches_correctly(self, tmp_path):
+        detector = CountingDetector(self.BOX)
+        results = _detect(detector, self._files(tmp_path, 5), batch_size=3)
+        assert [len(r["detections"]) for r in results] == [1] * 5
+        assert detector.batch_sizes == [3, 1, 2]   # one extra single-image run to check batching

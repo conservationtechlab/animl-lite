@@ -145,6 +145,10 @@ def detect(detector,
                                    use_progress_bar=use_progress_bar)
 
     start_time = time.time()
+    input_name = detector.get_inputs()[0].name
+    # some exports (e.g. MDv1000 sorrel) only return detections for the first image of a batch;
+    # checked on the first batch with more than one image
+    one_at_a_time = None
     for batch in dataloader:
         count += 1
 
@@ -154,8 +158,17 @@ def detect(detector,
             continue
 
         # ONNX Runtime inference
-        input_name = detector.get_inputs()[0].name
-        outputs = detector.run(None, {input_name: batch[0]})[0]
+        images = batch[0]
+        if one_at_a_time:
+            outputs = _run_one_at_a_time(detector, input_name, images)
+        else:
+            outputs = detector.run(None, {input_name: images})[0]
+            if one_at_a_time is None and len(images) > 1:
+                one_at_a_time = not _batch_matches_single(detector, input_name, images, outputs, confidence_threshold)
+                if one_at_a_time:
+                    print("Warning: this detector doesn't return detections for every image of a batch, "
+                          "running one image at a time.")
+                    outputs = _run_one_at_a_time(detector, input_name, images)
         outputs = _convert_detections(outputs,
                                       batch,
                                       letterbox,
@@ -177,6 +190,26 @@ def detect(detector,
         _save_detection_checkpoint(checkpoint_path, results)
 
     return results
+
+
+def _run_one_at_a_time(detector, input_name: str, images: np.ndarray) -> list:
+    '''Detector output for each image of a batch, run separately'''
+    return [detector.run(None, {input_name: images[i:i + 1]})[0][0] for i in range(len(images))]
+
+
+def _batch_matches_single(detector, input_name: str, images: np.ndarray,
+                          batched_output, confidence_threshold: float) -> bool:
+    '''Whether the batched output for the last image matches running that image alone'''
+    def kept(output):
+        output = np.asarray(output)
+        if output.ndim != 2 or output.shape[1] < 5:
+            return output
+        output = output[output[:, 4] >= confidence_threshold]
+        return output[np.argsort(-output[:, 4], kind="stable")]
+
+    single = kept(detector.run(None, {input_name: images[-1:]})[0][0])
+    batched = kept(batched_output[-1])
+    return single.shape == batched.shape and np.allclose(single, batched, rtol=1e-3, atol=1e-2)
 
 
 def _convert_detections(predictions: list,
