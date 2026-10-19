@@ -76,3 +76,33 @@ class TestBoxes:
         detector = FakeDetector([[300, 300, 300, 700, 0.9, 0], [300, 300, 700, 700, 0.8, 0]])
         (result,) = _detect(detector, pd.DataFrame({"filepath": [_image(tmp_path)], "frame": [0]}))
         assert [d["conf"] for d in result["detections"]] == pytest.approx([0.8])
+
+
+class TestInputs:
+    BOX = [[300, 300, 700, 700, 0.8, 0]]
+
+    def test_single_path(self, tmp_path):
+        """ManifestGenerator isn't subscriptable; a single path raised a TypeError"""
+        path = _image(tmp_path)
+        (result,) = _detect(FakeDetector(self.BOX), path)
+        assert result["filepath"] == path
+        assert len(result["detections"]) == 1
+
+    def test_custom_file_col(self, tmp_path):
+        path = _image(tmp_path)
+        (result,) = _detect(FakeDetector(self.BOX), pd.DataFrame({"path": [path], "frame": [0]}), file_col="path")
+        assert result["filepath"] == path
+
+    def test_checkpoint_resumes_a_list(self, tmp_path, monkeypatch):
+        """Resuming filtered the input with DataFrame operations, which failed for a list"""
+        monkeypatch.setattr("builtins.input", lambda _prompt: "y")   # load the checkpoint
+        first, second = _image(tmp_path, "a.jpg"), _image(tmp_path, "b.jpg")
+        checkpoint = str(tmp_path / "checkpoint.json")
+        _detect(FakeDetector(self.BOX), [first], checkpoint_path=checkpoint)
+        detector = FakeDetector(self.BOX)
+        calls = []
+        run = detector.run
+        detector.run = lambda names, feed: calls.append(len(feed["images"])) or run(names, feed)
+        results = _detect(detector, [first, second], checkpoint_path=checkpoint)
+        assert sorted(r["filepath"] for r in results) == [first, second]
+        assert calls == [1]   # only the new image is detected

@@ -85,28 +85,7 @@ def detect(detector,
 
     # Single image filepath
     if isinstance(image_file_names, str):
-        # convert img path to tensor
-        manifest = pd.DataFrame([[image_file_names, 0]], columns=['filepath', 'frame'])
-        dataloader = ManifestGenerator(manifest,
-                                       resize_width=resize_width,
-                                       resize_height=resize_height,
-                                       crop=False,
-                                       normalize=True,
-                                       letterbox=letterbox,
-                                       batch_size=batch_size,
-                                       prefetch_size=prefetch_size,
-                                       num_workers=num_workers,
-                                       use_progress_bar=use_progress_bar)
-
-        input_name = detector.get_inputs()[0].name
-        outputs = detector.run(None, {input_name: dataloader[0]})[0]
-        results = _convert_detections(outputs,
-                                      dataloader,
-                                      letterbox,
-                                      confidence_threshold=confidence_threshold,
-                                      category_map=category_map,
-                                      model_type=detector.model_type)
-        return results
+        manifest = pd.DataFrame([[image_file_names, 0]], columns=[file_col, 'frame'])
 
     # list of image filepaths
     elif isinstance(image_file_names, list):
@@ -143,13 +122,12 @@ def detect(detector,
     if checkpoint_path and file_management.check_file(checkpoint_path, output_type="Megadetector raw output"):
         results = file_management.load_json(checkpoint_path).get('images')
         already_processed = set([r['filepath'] for r in results])
-        manifest = image_file_names[~image_file_names[file_col].isin(already_processed)][[file_col, 'frame']].reset_index(drop=True)
+        manifest = manifest[~manifest[file_col].isin(already_processed)].reset_index(drop=True)
         if manifest.empty:
             print("All images have already been processed. Exiting.")
             return results
     else:
         results = []
-        image_file_names = set(image_file_names)
 
     count = 0
 
@@ -157,6 +135,7 @@ def detect(detector,
     dataloader = ManifestGenerator(manifest,
                                    resize_width=resize_width,
                                    resize_height=resize_height,
+                                   file_col=file_col,
                                    crop=False,
                                    normalize=True,
                                    letterbox=letterbox,
