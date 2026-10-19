@@ -165,7 +165,8 @@ def classify(model,
     start_time = time()
     for batch_images, _, _, _ in dataset:
         output = model.run(None, {model.get_inputs()[0].name: batch_images})
-        raw_output.extend(softmax(output))
+        # softmax over each image's classes; output is a list of the model's outputs
+        raw_output.append(softmax(output[0]))
 
     raw_output = np.vstack(raw_output)
 
