@@ -50,6 +50,9 @@ class TestCountFramesInvalidInput:
             def get(self, prop):
                 return 0
 
+            def release(self):
+                pass
+
         monkeypatch.setattr(video_processing.cv2, "VideoCapture", _EmptyCapture)
         assert video_processing._count_frames(path) is None
         assert "has 0 frames" in capsys.readouterr().out
@@ -77,6 +80,14 @@ class TestCountFramesSelection:
     def test_fps_frames_capped_at_last_frame(self, tmp_path):
         frames = _selected(_video(tmp_path / "clip.mp4", 10, fps=5), fps=12)
         assert max(frames) <= 9
+
+    def test_no_repeated_frames_when_sampling_faster_than_the_video(self, tmp_path):
+        frames = _selected(_video(tmp_path / "clip.mp4", 10, fps=5), fps=12)
+        assert frames == sorted(set(frames))
+
+    def test_no_repeated_frames_when_asking_for_more_than_the_video_has(self, tmp_path):
+        """increment was 0, so frame 0 was returned for every requested frame"""
+        assert _selected(_video(tmp_path / "clip.mp4", 3), frames=5) == [0, 1, 2]
 
     def test_returns_filepath_with_each_frame(self, tmp_path):
         path = _video(tmp_path / "clip.mp4", 20)
