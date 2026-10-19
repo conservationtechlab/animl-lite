@@ -64,3 +64,22 @@ class TestPrefetch:
         assert first[1] == [manifest["filepath"][0]]
         files = [f for _, paths, _, _ in gen for f in paths]
         assert files == manifest["filepath"].tolist()
+
+
+class TestReturnIndices:
+    @pytest.mark.parametrize("num_workers", [0, 2])
+    def test_indices_of_loaded_items(self, tmp_path, num_workers):
+        """Unloadable items are left out, so batch positions don't match manifest rows"""
+        manifest = _images(tmp_path, 5)
+        manifest.loc[1, "filepath"] = str(tmp_path / "missing.jpg")
+        manifest.index = [10, 11, 12, 13, 14]   # positions, not labels, are returned
+        gen = _generator(manifest, num_workers=num_workers, return_indices=True)
+        batches = list(gen)
+        assert [b[4].tolist() for b in batches] == [[0], [2, 3], [4]]
+        for images, paths, _, _, indices in batches:
+            assert len(images) == len(paths) == len(indices)
+            assert paths == manifest["filepath"].iloc[indices].tolist()
+
+    def test_four_items_by_default(self, tmp_path):
+        (batch,) = list(_generator(_images(tmp_path, 2), num_workers=0))
+        assert len(batch) == 4
