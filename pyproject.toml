@@ -34,3 +34,7 @@ gpu = [
 # https://pip.pypa.io/en/stable/reference/pip/#pep-517-and-518-support
 requires = ["setuptools>=42"]
 build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+# test this checkout, not an installed animl-lite
+pythonpath = ["src"]

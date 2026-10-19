@@ -71,7 +71,9 @@ def test_model_types_contains_expected_values(model):
     "providers,user_set,quiet,expected",
     [
         (["CUDAExecutionProvider", "CPUExecutionProvider"], "cpu", False, ["CPUExecutionProvider"]),
-        (["CUDAExecutionProvider", "CPUExecutionProvider"], "cpu", True, ["CUDAExecutionProvider", "CPUExecutionProvider"]),
+        # choosing cpu must hold whether or not messages are printed
+        (["CUDAExecutionProvider", "CPUExecutionProvider"], "cpu", True, ["CPUExecutionProvider"]),
+        (["CUDAExecutionProvider", "CPUExecutionProvider"], "CPUExecutionProvider", True, ["CPUExecutionProvider"]),
         (
             ["CUDAExecutionProvider", "CPUExecutionProvider"],
             "cuda:1",
@@ -209,3 +211,28 @@ def test_scale_letterbox_returns_valid_normalized_bbox(bbox, resized, original):
     assert out.shape == (4,)
     assert np.all(out >= 0)
     assert np.all(out <= 1)
+
+
+class _Session:
+    def __init__(self, active):
+        self.active = active
+
+    def get_providers(self):
+        return self.active
+
+
+@pytest.mark.parametrize(
+    "requested, active, warns",
+    [
+        # cuda requested but the session fell back to cpu (e.g. cuDNN missing)
+        (["CUDAExecutionProvider", "CPUExecutionProvider"], ["CPUExecutionProvider"], True),
+        ([("CUDAExecutionProvider", {"device_id": 1}), "CPUExecutionProvider"], ["CPUExecutionProvider"], True),
+        (["CUDAExecutionProvider", "CPUExecutionProvider"], ["CUDAExecutionProvider", "CPUExecutionProvider"], False),
+        (["CPUExecutionProvider"], ["CPUExecutionProvider"], False),
+    ],
+)
+def test_create_onnx_session_warns_on_cuda_fallback(monkeypatch, recwarn, requested, active, warns):
+    monkeypatch.setattr(general.ort, "InferenceSession", lambda _path, providers: _Session(active))
+    session = general.create_onnx_session("model.onnx", requested)
+    assert session.get_providers() == active
+    assert any("CUDA was requested" in str(w.message) for w in recwarn) is warns

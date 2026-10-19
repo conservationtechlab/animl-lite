@@ -23,6 +23,49 @@ from animl.utils.general import SDZWA_CLASSIFIER_SIZE
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
+# end of the batches, from the prefetch worker
+_END = object()
+
+
+class _WorkerError:
+    '''An exception raised in the prefetch worker, re-raised by the consumer'''
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+
+def predict_by_row(model, dataset: "ManifestGenerator", transform=None) -> np.ndarray:
+    '''
+    Run an ONNX model over a ManifestGenerator, one output row per manifest row
+
+    Items that can't be loaded are left out of their batch, so results are placed
+    by the manifest indices of each batch; rows of items that couldn't be loaded
+    are NaN.
+
+    Args:
+        model: onnxruntime session
+        dataset (ManifestGenerator): generator built with return_indices=True
+        transform (callable): applied to each batch's output, e.g. softmax
+
+    Returns:
+        np.ndarray of shape (len(manifest), output size)
+    '''
+    if not dataset.return_indices:
+        raise ValueError("predict_by_row needs a ManifestGenerator with return_indices=True")
+    result = None
+    for batch_images, _, _, _, indices in dataset:
+        output = model.run(None, {model.get_inputs()[0].name: batch_images})[0]
+        if transform is not None:
+            output = transform(output)
+        output = output.reshape(len(indices), -1)
+        if result is None:
+            dtype = output.dtype if np.issubdtype(output.dtype, np.floating) else np.float64
+            result = np.full((len(dataset.manifest), output.shape[1]), np.nan, dtype=dtype)
+        result[indices] = output
+    if result is None:
+        # nothing could be loaded
+        result = np.full((len(dataset.manifest), 0), np.nan, dtype=np.float32)
+    return result
+
 
 class ManifestGenerator:
     '''
@@ -45,7 +88,8 @@ class ManifestGenerator:
                  prefetch_size: int = 2,
                  num_workers: int = 2,
                  dtype: np.dtype = np.float32,
-                 use_progress_bar: bool = False) -> None:
+                 use_progress_bar: bool = False,
+                 return_indices: bool = False) -> None:
 
         self.manifest = manifest.reset_index(drop=True)
         self.file_col = file_col
@@ -60,6 +104,9 @@ class ManifestGenerator:
         self.num_workers = max(0, num_workers)
         self.dtype = dtype
         self.use_progress_bar = use_progress_bar
+        # items that can't be loaded are left out of their batch; with return_indices,
+        # each batch also gives the manifest positions of the items it holds
+        self.return_indices = return_indices
         
         self._validate_config()
         
@@ -123,70 +170,91 @@ class ManifestGenerator:
     
     def _iter_with_prefetch(self) -> Generator:
         '''Multi-threaded iteration with async prefetching.'''
+        # a fresh queue, so batches left over from an earlier, interrupted iteration aren't yielded
+        self._batch_queue = queue.Queue(maxsize=self.prefetch_size)
         self._stop_event.clear()
         self._prefetch_thread = threading.Thread(
             target=self._prefetch_worker,
             daemon=True
         )
         self._prefetch_thread.start()
-        
+
+        progress = None
+        if self.use_progress_bar:
+            try:
+                from tqdm import tqdm
+                progress = tqdm(total=len(self), desc="Loading batches", unit="batch")
+            except ImportError:
+                pass
+
         try:
-            batch_count = 0
-            iterator = range(len(self))
-            if self.use_progress_bar:
+            while True:
+                # wait as long as the worker is running: a slow batch (large images,
+                # videos, network drives) must not end the iteration early
                 try:
-                    from tqdm import tqdm
-                    iterator = tqdm(iterator, desc="Loading batches", unit="batch")
-                except ImportError:
-                    pass
-            
-            for _ in iterator:
-                try:
-                    batch = self._batch_queue.get(timeout=30)
-                    if batch is None:  # Sentinel for end
-                        break
-                    yield batch
-                    batch_count += 1
+                    batch = self._batch_queue.get(timeout=1)
                 except queue.Empty:
-                    print("Prefetch timeout - worker may be stuck")
+                    if not self._prefetch_thread.is_alive():
+                        raise RuntimeError("Prefetch worker stopped without finishing")
+                    continue
+                if batch is _END:
                     break
+                if isinstance(batch, _WorkerError):
+                    raise batch.error
+                if progress is not None:
+                    progress.update(1)
+                yield batch
         finally:
             self._stop_event.set()
+            if progress is not None:
+                progress.close()
             if self._prefetch_thread:
                 self._prefetch_thread.join(timeout=5)
-    
+
     def _prefetch_worker(self) -> None:
         '''Worker thread that prefetches batches.'''
         try:
             batch_indices = []
             for idx in range(len(self.manifest)):
                 if self._stop_event.is_set():
-                    break
-                
+                    return
+
                 batch_indices.append(idx)
-                
+
                 if len(batch_indices) == self.batch_size or idx == len(self.manifest) - 1:
                     batch = self._load_batch(batch_indices)
-                    if batch is not None:
-                        self._batch_queue.put(batch)
+                    if batch is not None and not self._put(batch):
+                        return
                     batch_indices = []
-            
-            self._batch_queue.put(None)  # Sentinel
+
+            self._put(_END)
         except Exception as e:
-            print(f"Prefetch worker error: {e}")
-            self._batch_queue.put(None)
-    
+            # hand the error to the consumer instead of ending the iteration as if it had finished
+            self._put(_WorkerError(e))
+
+    def _put(self, item) -> bool:
+        '''Queue an item for the consumer; False if the iteration was stopped meanwhile.'''
+        while not self._stop_event.is_set():
+            try:
+                self._batch_queue.put(item, timeout=0.1)
+                return True
+            except queue.Full:
+                continue
+        return False
+
     def _load_batch(self, indices: list) -> Optional[Tuple]:
         '''Load a batch of samples.'''
         batch_images = []
         batch_filepaths = []
         batch_frames = []
         batch_hw = []
+        batch_indices = []
         
         for idx in indices:
             item = self._load_item(idx)
             if item is not None:
                 img_arr, filepath, frame, hw = item
+                batch_indices.append(idx)
                 batch_images.append(img_arr)
                 batch_filepaths.append(filepath)
                 batch_frames.append(frame)
@@ -200,6 +268,8 @@ class ManifestGenerator:
         batch_frames_arr = np.array(batch_frames, dtype=np.int32)
         batch_hw_arr = np.stack(batch_hw, axis=0)
         
+        if self.return_indices:
+            return batch_np, batch_filepaths, batch_frames_arr, batch_hw_arr, np.array(batch_indices, dtype=np.int64)
         return batch_np, batch_filepaths, batch_frames_arr, batch_hw_arr
     
     def _load_item(self, idx: int) -> Optional[Tuple]:
@@ -227,21 +297,16 @@ class ManifestGenerator:
             
             width, height = img.size
             
-            # Maintain aspect ratio if one dimension is zero
-            if self.resize_width > 0 and self.resize_height <= 0:
-                self.resize_height = int(width / height * self.resize_width)
-            elif self.resize_width <= 0 and self.resize_height > 0:
-                self.resize_width = int(height / width * self.resize_height)
-            
             # Cropping if requested
             if self.crop:
                 img = self._apply_crop(img, row, width, height)
             
             # Resizing
+            target_w, target_h = self._target_size(*img.size)
             if self.letterbox:
-                img = self._letterbox_resize(img)
+                img = self._letterbox_resize(img, target_w, target_h)
             else:
-                img = img.resize((self.resize_width, self.resize_height), Image.BILINEAR)
+                img = img.resize((target_w, target_h), Image.BILINEAR)
             
             # Convert to numpy array
             img_arr = self._pil_to_numpy(img)
@@ -310,10 +375,27 @@ class ManifestGenerator:
         
         return img.crop((left, top, right, bottom))
     
-    def _letterbox_resize(self, img: Image.Image) -> Image.Image:
+    def _target_size(self, width: int, height: int) -> Tuple[int, int]:
+        '''
+        Output size for an image of the given size
+
+        If one of resize_width / resize_height is 0 or less, it follows the image's
+        aspect ratio. Images of different aspect ratios then get different sizes,
+        which can only be batched with batch_size=1.
+        '''
+        if self.resize_width > 0 and self.resize_height <= 0:
+            return self.resize_width, max(1, round(self.resize_width * height / width))
+        if self.resize_width <= 0 and self.resize_height > 0:
+            return max(1, round(self.resize_height * width / height)), self.resize_height
+        return self.resize_width, self.resize_height
+
+    def _letterbox_resize(self, img: Image.Image,
+                          target_w: Optional[int] = None,
+                          target_h: Optional[int] = None) -> Image.Image:
         '''Resize with letterboxing to maintain aspect ratio.'''
         width, height = img.size
-        target_w, target_h = self.resize_width, self.resize_height
+        target_w = self.resize_width if target_w is None else target_w
+        target_h = self.resize_height if target_h is None else target_h
         
         if round((width / height), 2) == round((target_w / target_h), 2):
             return img.resize((target_w, target_h), Image.BILINEAR)
