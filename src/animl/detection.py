@@ -322,8 +322,6 @@ def parse_detections(detections: list[dict],
     # check results format
     if not isinstance(detections, list):
         raise TypeError("MD results input must be list")
-    if len(detections) == 0:
-        raise AssertionError("'detections' contains no detections")
 
     # load results from file if they have already been parsed
     if file_management.check_file(out_file, output_type="Detections"):
@@ -368,7 +366,10 @@ def parse_detections(detections: list[dict],
                         data['clarity'] = detection.get('clarity', None)
                     lst.append(data)
 
-    df = pd.DataFrame(lst)
+    # columns are set so an empty result (no images, e.g. all unreadable) can still be merged and filtered
+    columns = ['filepath', 'frame', 'max_detection_conf', 'category', 'category_label',
+               'conf', 'bbox_x', 'bbox_y', 'bbox_w', 'bbox_h'] + (['score', 'clarity'] if score else [])
+    df = pd.DataFrame(lst, columns=columns)
 
     if manifest is not None:
         if file_col in manifest.columns:
