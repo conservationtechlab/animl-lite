@@ -53,7 +53,8 @@ class ManifestGenerator:
                  prefetch_size: int = 2,
                  num_workers: int = 2,
                  dtype: np.dtype = np.float32,
-                 quiet: bool = True) -> None:
+                 quiet: bool = True,
+                 return_indices: bool = False) -> None:
 
         self.manifest = manifest.reset_index(drop=True)
         self.file_col = file_col
@@ -68,6 +69,9 @@ class ManifestGenerator:
         self.num_workers = max(0, num_workers)
         self.dtype = dtype
         self.quiet = quiet
+        # items that can't be loaded are left out of their batch; with return_indices,
+        # each batch also gives the manifest positions of the items it holds
+        self.return_indices = return_indices
         
         self._validate_config()
         
@@ -209,11 +213,13 @@ class ManifestGenerator:
         batch_filepaths = []
         batch_frames = []
         batch_hw = []
+        batch_indices = []
         
         for idx in indices:
             item = self._load_item(idx)
             if item is not None:
                 img_arr, filepath, frame, hw = item
+                batch_indices.append(idx)
                 batch_images.append(img_arr)
                 batch_filepaths.append(filepath)
                 batch_frames.append(frame)
@@ -227,6 +233,8 @@ class ManifestGenerator:
         batch_frames_arr = np.array(batch_frames, dtype=np.int32)
         batch_hw_arr = np.stack(batch_hw, axis=0)
         
+        if self.return_indices:
+            return batch_np, batch_filepaths, batch_frames_arr, batch_hw_arr, np.array(batch_indices, dtype=np.int64)
         return batch_np, batch_filepaths, batch_frames_arr, batch_hw_arr
     
     def _load_item(self, idx: int) -> Optional[Tuple]:
