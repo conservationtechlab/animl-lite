@@ -17,7 +17,8 @@ import onnxruntime as ort
 from animl import file_management
 from animl.generator import ManifestGenerator
 from animl.utils.general import (_normalize_boxes, _xyxy2xywh, _scale_letterbox, get_onnx_device,
-                                 _crop_clarity, _frame_score, _normalize_aspect_mode)
+                                 _crop_clarity, _frame_score, _normalize_aspect_mode,
+                                 _coerce_weights, ScoreWeights)
 from animl.utils.visualization import MD_LABELS
 
 
@@ -52,7 +53,7 @@ def detect(detector,
            confidence_threshold: float = 0.1,
            calculate_clarity: bool = False,
            aspect_mode: Optional[str] = None,
-           score_weights: Optional[dict] = None,
+           score_weights: Optional[ScoreWeights] = None,
            batch_size: int = 8,
            prefetch_size: int = 2,
            num_workers: int = 2,
@@ -76,8 +77,8 @@ def detect(detector,
         aspect_mode (str): aspect-ratio preference in the frame score. Defaults to None so detection stays
                                     species-neutral; callers that know the target species can set 'wide'
                                     (animals wider than tall) or 'tall' (animals taller than wide)
-        score_weights (dict): weights for the frame score with keys conf, area, aspect and clarity
-                                    (defaults to animl.utils.general.SCORE_WEIGHTS)
+        score_weights (ScoreWeights): weights for the frame score (a dict with keys conf, area, aspect and
+                                    clarity is also accepted; defaults to animl.utils.general.DEFAULT_SCORE_WEIGHTS)
         file_col (str): column name containing file paths
         batch_size (int): number of images per batch
         prefetch_size (int): number of batches to prefetch
@@ -220,7 +221,7 @@ def _convert_detections(predictions: list,
                         category_map: dict = MD_LABELS,
                         calculate_clarity=False,
                         aspect_mode: Optional[str] = None,
-                        score_weights: Optional[dict] = None) -> pd.DataFrame:
+                        score_weights: Optional[ScoreWeights] = None) -> pd.DataFrame:
     # Converts output into nested list with categories, conf, and bboxes in expected format for parsing function.
     # Supports YOLOv5/MDv5, YOLOv6+, and ONNX models with either relative or absolute bounding box outputs.
     # If letterbox=True, rescales bboxes back to original image size.
@@ -238,6 +239,7 @@ def _convert_detections(predictions: list,
         category_map = MD_LABELS
 
     aspect_mode = _normalize_aspect_mode(aspect_mode)
+    score_weights = _coerce_weights(score_weights)
 
     results = []
 

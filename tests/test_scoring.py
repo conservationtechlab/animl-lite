@@ -1,13 +1,16 @@
 """Tests for the frame score used to pick the best frames of a video (issue #20)."""
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import pytest
 
 from animl.detection import _convert_detections
 from animl.utils.general import (
     ASPECT_MODES,
-    SCORE_WEIGHTS,
+    DEFAULT_SCORE_WEIGHTS,
+    ScoreWeights,
     _aspect_score,
     _crop_clarity,
     _frame_score,
@@ -19,7 +22,54 @@ from animl.utils.general import (
 # ---------------------------------------------------------------------------
 
 def test_default_weights_sum_to_one():
-    assert sum(SCORE_WEIGHTS.values()) == pytest.approx(1.0)
+    w = DEFAULT_SCORE_WEIGHTS
+    assert w.conf + w.area + w.aspect + w.clarity == pytest.approx(1.0)
+
+
+def test_weights_are_immutable():
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        DEFAULT_SCORE_WEIGHTS.conf = 0.5
+
+
+def test_weights_from_dict_requires_all_keys():
+    with pytest.raises(ValueError, match="clarity"):
+        ScoreWeights.from_dict({'conf': 1.0, 'area': 0.0, 'aspect': 0.0})
+
+
+def test_weights_from_dict_rejects_unknown_keys():
+    with pytest.raises(ValueError, match="sharpness"):
+        ScoreWeights.from_dict({'conf': 0.1, 'area': 0.5, 'aspect': 0.1, 'clarity': 0.3, 'sharpness': 1})
+
+
+@pytest.mark.parametrize("bad", [-0.1, float("nan"), float("inf"), "0.5", None, True])
+def test_weights_reject_bad_values(bad):
+    with pytest.raises(ValueError):
+        ScoreWeights(conf=bad)
+
+
+def test_weights_reject_all_zero():
+    with pytest.raises(ValueError):
+        ScoreWeights(conf=0, area=0, aspect=0, clarity=0)
+
+
+def test_frame_score_accepts_dict_or_dataclass_and_rejects_other_types():
+    args = (0.7, 0.4, 0.3, 0.5, 1000, 1000)
+    as_dict = {'conf': 0.2, 'area': 0.4, 'aspect': 0.1, 'clarity': 0.3}
+    assert _frame_score(*args, aspect_mode="wide", weights=as_dict) == pytest.approx(
+        _frame_score(*args, aspect_mode="wide", weights=ScoreWeights(**as_dict)))
+    with pytest.raises(TypeError):
+        _frame_score(*args, weights=[0.2, 0.4, 0.1, 0.3])
+
+
+def test_frame_score_rejects_dict_with_missing_key():
+    with pytest.raises(ValueError):
+        _frame_score(0.7, 0.4, 0.3, 0.5, 1000, 1000, weights={'conf': 1.0})
+
+
+def test_none_mode_needs_a_nonzero_non_aspect_weight():
+    only_aspect = ScoreWeights(conf=0, area=0, aspect=1.0, clarity=0)
+    with pytest.raises(ValueError):
+        _frame_score(0.7, 0.4, 0.3, 0.5, 1000, 1000, aspect_mode=None, weights=only_aspect)
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +160,7 @@ def test_sharper_crop_scores_higher():
 
 
 def test_custom_weights_are_used():
-    only_conf = {'conf': 1.0, 'area': 0.0, 'aspect': 0.0, 'clarity': 0.0}
+    only_conf = ScoreWeights(conf=1.0, area=0.0, aspect=0.0, clarity=0.0)
     assert _frame_score(0.7, 0.9, 0.9, 1.0, 1000, 1000, weights=only_conf) == pytest.approx(0.7)
 
 
@@ -193,3 +243,10 @@ def test_convert_detections_rejects_bad_aspect_mode():
 
 def test_aspect_modes_constant():
     assert set(ASPECT_MODES) == {"wide", "tall"}  # None means no preference
+
+
+def test_convert_detections_rejects_bad_weights():
+    pred, batch = _batch()
+    with pytest.raises(ValueError):
+        _convert_detections(pred, batch, letterbox=False, calculate_clarity=True,
+                            score_weights={'conf': 1.0})
