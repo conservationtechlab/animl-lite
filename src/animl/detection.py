@@ -16,7 +16,9 @@ import onnxruntime as ort
 
 from animl import file_management
 from animl.generator import ManifestGenerator
-from animl.utils.general import _normalize_boxes, _xyxy2xywh, _scale_letterbox, get_onnx_device, _laplacian_variance
+from animl.utils.general import (_normalize_boxes, _xyxy2xywh, _scale_letterbox, get_onnx_device,
+                                 _crop_clarity, _frame_score, _normalize_aspect_mode,
+                                 _coerce_weights, ScoreWeights)
 from animl.utils.visualization import MD_LABELS
 
 
@@ -50,6 +52,8 @@ def detect(detector,
            category_map: Optional[dict] = MD_LABELS,
            confidence_threshold: float = 0.1,
            calculate_clarity: bool = False,
+           aspect_mode: Optional[str] = None,
+           score_weights: Optional[ScoreWeights] = None,
            batch_size: int = 8,
            prefetch_size: int = 2,
            num_workers: int = 2,
@@ -68,7 +72,13 @@ def detect(detector,
         letterbox (bool): if True, resize and pad image to keep aspect ratio, else resize without padding
         category_map (dict): mapping of category IDs to human-readable labels
         confidence_threshold (float): only detections above this threshold are returned
-        calculate_clarity (bool): if True, calculate image clarity using Laplacian variance
+        calculate_clarity (bool): if True, calculate the clarity of each detected animal (Laplacian variance of its
+                                    bounding-box crop) and a frame score used to pick the best frames of a video
+        aspect_mode (str): aspect-ratio preference in the frame score. Defaults to None so detection stays
+                                    species-neutral; callers that know the target species can set 'wide'
+                                    (animals wider than tall) or 'tall' (animals taller than wide)
+        score_weights (ScoreWeights): weights for the frame score (a dict with keys conf, area, aspect and
+                                    clarity is also accepted; defaults to animl.utils.general.DEFAULT_SCORE_WEIGHTS)
         file_col (str): column name containing file paths
         batch_size (int): number of images per batch
         prefetch_size (int): number of batches to prefetch
@@ -184,7 +194,9 @@ def detect(detector,
                                       confidence_threshold=confidence_threshold,
                                       category_map=category_map,
                                       model_type=detector.model_type,
-                                      calculate_clarity=calculate_clarity)
+                                      calculate_clarity=calculate_clarity,
+                                      aspect_mode=aspect_mode,
+                                      score_weights=score_weights)
         # Process outputs to match expected format
         results.extend(outputs)
 
@@ -207,7 +219,9 @@ def _convert_detections(predictions: list,
                         confidence_threshold: float = 0.1,
                         model_type: str = 'megadetector',
                         category_map: dict = MD_LABELS,
-                        calculate_clarity=False) -> pd.DataFrame:
+                        calculate_clarity=False,
+                        aspect_mode: Optional[str] = None,
+                        score_weights: Optional[ScoreWeights] = None) -> pd.DataFrame:
     # Converts output into nested list with categories, conf, and bboxes in expected format for parsing function.
     # Supports YOLOv5/MDv5, YOLOv6+, and ONNX models with either relative or absolute bounding box outputs.
     # If letterbox=True, rescales bboxes back to original image size.
@@ -223,6 +237,9 @@ def _convert_detections(predictions: list,
         print("No category map provided, defaulting to MD_LABELS. ",
               "This may lead to incorrect category labels if using a custom model.")
         category_map = MD_LABELS
+
+    aspect_mode = _normalize_aspect_mode(aspect_mode)
+    score_weights = _coerce_weights(score_weights)
 
     results = []
 
@@ -257,6 +274,8 @@ def _convert_detections(predictions: list,
                 if bbox.all() == 0:
                     continue
 
+                tensor_bbox = bbox.copy()  # box in the model-input image, used to crop for clarity
+
                 if letterbox:
                     bbox = _scale_letterbox(bbox, image_tensors[i].shape[1:], image_sizes[i, :])
 
@@ -274,12 +293,14 @@ def _convert_detections(predictions: list,
                              'bbox_h': float(round(bbox[3], 4))}
 
                 if calculate_clarity:
-                    # calculate image clarity using Laplacian variance
-                    clarity = _laplacian_variance(image_tensors[i].transpose(1, 2, 0))
-                    detection['clarity'] = min(clarity / 500, 1.0)
-                    detection['score'] = (0.4 * detection['conf'] +
-                                          0.3 * detection['bbox_w'] * detection['bbox_h'] +
-                                          0.3 * detection['clarity'])
+                    # clarity of the animal itself (bounding-box crop), not the whole frame
+                    clarity = _crop_clarity(image_tensors[i].transpose(1, 2, 0), tensor_bbox)
+                    detection['clarity'] = clarity
+                    # image_sizes[i] is the original (height, width); needed to measure aspect in pixels
+                    img_h, img_w = int(image_sizes[i][0]), int(image_sizes[i][1])
+                    detection['score'] = _frame_score(detection['conf'], detection['bbox_w'], detection['bbox_h'],
+                                                      clarity, img_w, img_h,
+                                                      aspect_mode=aspect_mode, weights=score_weights)
 
                 detections.append(detection)
 
