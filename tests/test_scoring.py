@@ -52,6 +52,32 @@ def test_weights_reject_all_zero():
         ScoreWeights(conf=0, area=0, aspect=0, clarity=0)
 
 
+@pytest.mark.parametrize("weights", [
+    dict(conf=1, area=1, aspect=1, clarity=1),            # sum 4
+    dict(conf=0.2, area=0.55, aspect=0.1, clarity=0.25),  # sum 1.1
+    dict(conf=0.1, area=0.5, aspect=0.1, clarity=0.2),    # sum 0.9
+])
+def test_weights_must_sum_to_one(weights):
+    with pytest.raises(ValueError, match="sum to 1"):
+        ScoreWeights(**weights)
+
+
+def test_weights_summing_to_one_within_rounding_are_accepted():
+    ScoreWeights(conf=0.1, area=0.55, aspect=0.1, clarity=0.25000001)
+    ScoreWeights(conf=1 / 3, area=1 / 3, aspect=0.0, clarity=1 / 3)
+
+
+def test_score_never_exceeds_one_for_valid_weights():
+    for mode in ("wide", "tall", None):
+        assert _frame_score(1.0, 1.0, 1.0, 1.0, 1000, 1000, aspect_mode=mode) <= 1.0 + 1e-9
+
+
+def test_frame_score_rejects_dict_weights_that_do_not_sum_to_one():
+    with pytest.raises(ValueError, match="sum to 1"):
+        _frame_score(0.7, 0.4, 0.3, 0.5, 1000, 1000,
+                     weights={'conf': 1, 'area': 1, 'aspect': 1, 'clarity': 1})
+
+
 def test_frame_score_accepts_dict_or_dataclass_and_rejects_other_types():
     args = (0.7, 0.4, 0.3, 0.5, 1000, 1000)
     as_dict = {'conf': 0.2, 'area': 0.4, 'aspect': 0.1, 'clarity': 0.3}

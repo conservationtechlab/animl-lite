@@ -87,8 +87,9 @@ def _laplacian_variance(image):
 @dataclass(frozen=True)
 class ScoreWeights:
     """
-    Weights for the frame score (see _frame_score). All four fields are required, so a
-    missing weight is an error instead of a silent KeyError later on.
+    Weights for the frame score (see _frame_score). Each weight must be a finite number >= 0 and
+    the four must sum to 1, so a frame score always stays between 0 and 1. With aspect_mode=None the
+    aspect weight is dropped and the other three are rescaled to sum to 1.
 
     The defaults were chosen by comparing scoring options on hand-checked leopard videos
     (issue #20): confidence barely varies between a good and a bad frame, so it gets a
@@ -110,8 +111,9 @@ class ScoreWeights:
             value = getattr(self, f.name)
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
                 raise ValueError(f"score weight '{f.name}' must be a finite number >= 0, got {value!r}")
-        if self.conf + self.area + self.aspect + self.clarity <= 0:
-            raise ValueError("score weights must not all be zero")
+        total = self.conf + self.area + self.aspect + self.clarity
+        if not math.isclose(total, 1.0, abs_tol=1e-6):
+            raise ValueError(f"score weights must sum to 1 so scores stay between 0 and 1, got {total:g}")
 
     @classmethod
     def from_dict(cls, weights):
