@@ -2,6 +2,9 @@
 General utils
 
 """
+import math
+from dataclasses import dataclass, fields
+
 import cv2
 import numpy as np
 import onnxruntime as ort
@@ -79,6 +82,147 @@ def _laplacian_variance(image):
     laplacian = cv2.Laplacian(gray, cv2.CV_64F)
     
     return laplacian.var()
+
+
+@dataclass(frozen=True)
+class ScoreWeights:
+    """
+    Weights for the frame score (see _frame_score). Each weight must be a finite number >= 0 and
+    the four must sum to 1, so a frame score always stays between 0 and 1. With aspect_mode=None the
+    aspect weight is dropped and the other three are rescaled to sum to 1.
+
+    The defaults were chosen by comparing scoring options on hand-checked leopard videos
+    (issue #20): confidence barely varies between a good and a bad frame, so it gets a
+    small weight; box size and the sharpness of the animal itself do most of the work.
+
+    Args:
+        conf (float): detection confidence
+        area (float): bounding-box area (fraction of the image)
+        aspect (float): aspect-ratio preference (ignored when aspect_mode is None)
+        clarity (float): sharpness of the animal (Laplacian variance of the bbox crop)
+    """
+    conf: float = 0.10
+    area: float = 0.55
+    aspect: float = 0.10
+    clarity: float = 0.25
+
+    def __post_init__(self):
+        for f in fields(self):
+            value = getattr(self, f.name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                raise ValueError(f"score weight '{f.name}' must be a finite number >= 0, got {value!r}")
+        total = self.conf + self.area + self.aspect + self.clarity
+        if not math.isclose(total, 1.0, abs_tol=1e-6):
+            raise ValueError(f"score weights must sum to 1 so scores stay between 0 and 1, got {total:g}")
+
+    @classmethod
+    def from_dict(cls, weights):
+        """Build from a dict with keys conf, area, aspect and clarity; raises ValueError on missing or unknown keys."""
+        names = {f.name for f in fields(cls)}
+        missing = names - set(weights)
+        unknown = set(weights) - names
+        if missing or unknown:
+            raise ValueError(f"score weights need exactly the keys {sorted(names)}; "
+                             f"missing: {sorted(missing)}, unknown: {sorted(unknown)}")
+        return cls(**weights)
+
+
+DEFAULT_SCORE_WEIGHTS = ScoreWeights()
+
+
+def _coerce_weights(weights):
+    """None -> defaults; ScoreWeights -> itself; dict -> validated ScoreWeights."""
+    if weights is None:
+        return DEFAULT_SCORE_WEIGHTS
+    if isinstance(weights, ScoreWeights):
+        return weights
+    if isinstance(weights, dict):
+        return ScoreWeights.from_dict(weights)
+    raise TypeError(f"weights must be a ScoreWeights, a dict or None, got {type(weights).__name__}")
+
+
+ASPECT_MODES = ("wide", "tall")  # aspect_mode=None means no aspect-ratio preference
+
+
+def _normalize_aspect_mode(mode):
+    """Return 'wide', 'tall' or None. None (and the string 'none', for backwards compatibility) means no preference."""
+    if mode is None or (isinstance(mode, str) and mode.lower() == "none"):
+        return None
+    if mode not in ASPECT_MODES:
+        raise ValueError(f"aspect_mode must be None or one of {ASPECT_MODES}, got '{mode}'")
+    return mode
+
+
+def _crop_clarity(image, bbox):
+    """
+    Sharpness of the animal only: Laplacian variance of the bounding-box crop, scaled to [0, 1].
+
+    Args:
+        image (np.ndarray): H x W x C image the bbox refers to
+        bbox (array-like): normalized (x_corner, y_corner, width, height) relative to `image`
+
+    Returns:
+        float: min(laplacian_variance / 500, 1.0); 0.0 if the crop is empty
+    """
+    height, width = image.shape[:2]
+    x0 = int(np.clip(round(bbox[0] * width), 0, width))
+    y0 = int(np.clip(round(bbox[1] * height), 0, height))
+    x1 = int(np.clip(round((bbox[0] + bbox[2]) * width), 0, width))
+    y1 = int(np.clip(round((bbox[1] + bbox[3]) * height), 0, height))
+    if x1 - x0 < 2 or y1 - y0 < 2:
+        return 0.0
+    return min(float(_laplacian_variance(image[y0:y1, x0:x1])) / 500, 1.0)
+
+
+def _aspect_score(bbox_w, bbox_h, image_width, image_height, mode="wide"):
+    """
+    Rewards boxes with the preferred orientation, measured in PIXELS (stored boxes are
+    normalized, which distorts the ratio on a non-square image).
+
+    mode 'wide': width / height  (e.g. a leopard seen from the side)
+    mode 'tall': height / width  (e.g. a giraffe, or a bear standing up)
+    mode None:   0.0 (aspect ratio is ignored)
+    A ratio of 2:1 or more in the chosen direction gets the full score of 1.0.
+    """
+    mode = _normalize_aspect_mode(mode)
+    if mode is None:
+        return 0.0
+    w_px = bbox_w * image_width
+    h_px = bbox_h * image_height
+    if w_px <= 0 or h_px <= 0:
+        return 0.0
+    ratio = w_px / h_px if mode == "wide" else h_px / w_px
+    return min(ratio / 2.0, 1.0)
+
+
+def _frame_score(conf, bbox_w, bbox_h, clarity, image_width, image_height,
+                 aspect_mode=None, weights=None):
+    """
+    Weighted score used to pick the best frames of a video.
+
+    Args:
+        conf (float): detection confidence
+        bbox_w, bbox_h (float): normalized box size relative to the original image
+        clarity (float): crop clarity in [0, 1] (see _crop_clarity)
+        image_width, image_height (int): original image size in pixels
+        aspect_mode (str): None (default, species-neutral), 'wide' or 'tall' (see _aspect_score)
+        weights (ScoreWeights or dict): defaults to DEFAULT_SCORE_WEIGHTS; a dict must have the keys
+            conf, area, aspect and clarity
+
+    With aspect_mode=None the aspect weight is dropped and the other weights are
+    rescaled to sum to 1, so scores keep the same 0-1 range.
+    """
+    aspect_mode = _normalize_aspect_mode(aspect_mode)
+    w = _coerce_weights(weights)
+    if aspect_mode is None:
+        total = w.conf + w.area + w.clarity
+        if total <= 0:
+            raise ValueError("conf, area and clarity weights must not all be zero when aspect_mode is None")
+        return (w.conf * conf + w.area * bbox_w * bbox_h + w.clarity * clarity) / total
+    return (w.conf * conf
+            + w.area * bbox_w * bbox_h
+            + w.aspect * _aspect_score(bbox_w, bbox_h, image_width, image_height, aspect_mode)
+            + w.clarity * clarity)
 
 # ==============================================================================
 # COORDINATE CONVERSION
