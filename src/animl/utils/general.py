@@ -220,3 +220,54 @@ def _scale_letterbox(bbox, resized_shape, original_shape):
     xywh_coords = _xyxy2xywh(xyxy_coords)
 
     return xywh_coords
+
+def _nms(boxes, scores, iou_thres):
+    x1, y1, x2, y2 = boxes.T
+    areas = (x2 - x1) * (y2 - y1)
+    order = scores.argsort()[::-1]
+    keep = []
+    while order.size:
+        i = order[0]
+        keep.append(i)
+        if order.size == 1:
+            break
+        r = order[1:]
+        w = np.maximum(0, np.minimum(x2[i], x2[r]) - np.maximum(x1[i], x1[r]))
+        h = np.maximum(0, np.minimum(y2[i], y2[r]) - np.maximum(y1[i], y1[r]))
+        inter = w * h
+        iou = inter / (areas[i] + areas[r] - inter + 1e-9)
+        order = r[iou <= iou_thres]
+    return np.array(keep, dtype=np.int64)
+
+ 
+def non_max_suppression(raw, conf_thres=0.1, iou_thres=0.45, max_det=300,
+                        max_nms=30000, agnostic=False):
+    out = []
+    for pred in raw:
+        # prefilter on confidence threshold
+        pred = pred[pred[:, 4] > conf_thres]
+        if not len(pred):
+            out.append(np.zeros((0, 6), np.float32))
+            continue
+        # class conf = obj * cls
+        scores = pred[:, 5:] * pred[:, 4:5]                  
+        cls = scores.argmax(1)
+        conf = scores[np.arange(len(pred)), cls]
+        keep = conf > conf_thres
+        pred, cls, conf = pred[keep], cls[keep], conf[keep]
+        # empty after threshold
+        if not len(pred):
+            out.append(np.zeros((0, 6), np.float32))
+            continue
+        # convert xywh(center) -> xyxy
+        cx, cy, w, h = pred[:, :4].T                        
+        boxes = np.stack([cx - w/2, cy - h/2, cx + w/2, cy + h/2], 1)
+        if len(boxes) > max_nms:
+            top = conf.argsort()[::-1][:max_nms]
+            boxes, cls, conf = boxes[top], cls[top], conf[top]
+        # per-class NMS
+        offset = 0 if agnostic else cls[:, None] * 7680     
+        k = _nms(boxes + offset, conf, iou_thres)[:max_det]
+        out.append(np.concatenate([boxes[k], conf[k, None], cls[k, None]], 1).astype(np.float32))
+    return out
+ 

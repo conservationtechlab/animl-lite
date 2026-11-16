@@ -16,7 +16,8 @@ import onnxruntime as ort
 
 from animl import file_management
 from animl.generator import ManifestGenerator
-from animl.utils.general import _normalize_boxes, _xyxy2xywh, _scale_letterbox, get_onnx_device, _laplacian_variance
+from animl.utils.general import (_normalize_boxes, _xyxy2xywh, _scale_letterbox, get_onnx_device, 
+                                 _laplacian_variance, non_max_suppression)
 from animl.utils.visualization import MD_LABELS
 
 
@@ -26,7 +27,7 @@ def load_detector(model_path: str, model_type: str = "megadetector", device: Opt
 
     Args:
         model_path (str): path to model file
-        model_type (str): type of model expected ["megadetector", "yolo", "miewid"]
+        model_type (str): type of model expected ["megadetector", "megadetector_v5", "yolo", "miewid"]
         device (str): specify to run on cpu or gpu
 
     Returns:
@@ -226,6 +227,10 @@ def _convert_detections(predictions: list,
 
     results = []
 
+    # Run non-max suppression for MegaDetector v5 models to filter overlapping detections
+    if model_type == "megadetector_v5":
+        predictions = non_max_suppression(predictions, conf_thres=confidence_threshold, iou_thres=0.45)
+
     for i, pred in enumerate(predictions):
 
         boxes = pred[:, :4]  # Bounding box coordinates
@@ -240,7 +245,7 @@ def _convert_detections(predictions: list,
                     'frame': int(image_frames[i]),
                     'max_detection_conf': max_detection_conf,
                     # for MD models, set category to 0 (empty) if no detections, for other models set to None
-                    'category': 0 if model_type == "megadetector" else None,
+                    'category': 0 if model_type in ["megadetector", "megadetector_v5"] else None,
                     'category_label': 'empty',
                     'detections': []}
             results.append(data)
@@ -261,7 +266,7 @@ def _convert_detections(predictions: list,
                     bbox = _scale_letterbox(bbox, image_tensors[i].shape[1:], image_sizes[i, :])
 
                 # increase md categories by 1
-                if model_type == "megadetector":
+                if model_type in ["megadetector", "megadetector_v5"]:
                     category[j] += 1
 
                 # build detection dict
