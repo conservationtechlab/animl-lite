@@ -13,40 +13,49 @@ import onnxruntime as ort
 from animl.utils.general import get_onnx_device
 from animl.generator import ManifestGenerator
 
+
 MIEWID_SIZE = 440
+MIEWID_NORMALIZE = {"mean": [0.485, 0.456, 0.406], "std": [0.229, 0.224, 0.225]}
+
+MEGADESCRIPTOR_L_SIZE = 384
+MEGADESCRIPTOR_L_NORMALIZE = {"mean": [0.5, 0.5, 0.5], "std": [0.5, 0.5, 0.5]}
 
 
-def load_miew(file_path: str,
+def load_ried(file_path: str,
+              model_type: str,
               device: Optional[str] = None):
     """
-    Load MiewID from file path
+    Load re-identification model from file path
 
     Args:
         file_path (str): file path to model file
         device (str): device to load model to
+        model_type (str): type of the re-identification model (e.g., "miewid", "megadescriptor_l")
 
     Returns:
-        loaded miewid model object
+        loaded re-identification model object
     """
     device = get_onnx_device(user_set=device)
     print(f'Sending model to {device}')
-    miew = ort.InferenceSession(file_path, providers=device)
-    miew.model_type = 'miewid'
-    return miew
+    reid_model = ort.InferenceSession(file_path, providers=device)
+    reid_model.model_type = model_type
+    return reid_model
 
 
-def extract_miew_embeddings(miew_model,
+def extract_reid_embeddings(model,
                             manifest: pd.DataFrame,
+                            resize: int,
+                            normalize: dict = None,
                             file_col: str = "filepath",
-                            batch_size: int = 4,
+                            batch_size: int = 1,
                             prefetch_size: int = 2,
                             num_workers: int = 2,
                             use_progress_bar: bool = False):
     """
-    Wrapper for MiewID embedding extraction
+    Wrapper for re-identification embedding extraction
 
     Args:
-        miew_model: MiewID model object
+        model: re-identification model object
         manifest (pd.DataFrame): dataframe with columns 'filepath', 'emb_id'
         file_col (str): column name for file paths in manifest
         batch_size (int): number of images per batch
@@ -64,18 +73,17 @@ def extract_miew_embeddings(miew_model,
     if isinstance(manifest, pd.DataFrame):
 
         dataloader = ManifestGenerator(manifest,
-                                       resize_width=MIEWID_SIZE,
-                                       resize_height=MIEWID_SIZE,
+                                       resize_width=resize,
+                                       resize_height=resize,
                                        file_col=file_col,
                                        crop=True,
-                                       normalize={"mean": [0.485, 0.456, 0.406],
-                                                  "std": [0.229, 0.224, 0.225]},
+                                       normalize=normalize,
                                        batch_size=batch_size,
                                        prefetch_size=prefetch_size,
                                        num_workers=num_workers,
                                        use_progress_bar=use_progress_bar)
         for batch_images, _, _, _ in dataloader:
-            outputs = miew_model.run(None, {miew_model.get_inputs()[0].name: batch_images})
+            outputs = model.run(None, {model.get_inputs()[0].name: batch_images})
             output.extend(outputs)
         output = np.vstack(output)
     return output
