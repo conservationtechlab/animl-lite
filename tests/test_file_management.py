@@ -250,7 +250,7 @@ def test_manifest_generator_requires_bbox_when_crop_true(tmp_path: Path):
     df = pd.DataFrame({"filepath": [str(img)]})
     
     # Should not raise; instead it disables cropping and prints a message
-    gen = ManifestGenerator(df, crop=True)
+    gen = ManifestGenerator(df, resize_height=16, resize_width=16, crop=True)
     assert gen.crop is False
 
 
@@ -269,7 +269,7 @@ def test_manifest_generator_invalid_crop_coord(tmp_path: Path):
     })
     
     with pytest.raises(ValueError, match="crop_coord must be 'relative' or 'absolute'"):
-        ManifestGenerator(df, crop=True, crop_coord="bad")
+        ManifestGenerator(df, resize_height=16, resize_width=16, crop=True, crop_coord="bad")
 
 
 def test_manifest_dataloader_yields_batches(tmp_path: Path):

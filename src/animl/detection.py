@@ -16,17 +16,20 @@ import onnxruntime as ort
 
 from animl import file_management
 from animl.generator import ManifestGenerator
-from animl.utils.general import _normalize_boxes, _xyxy2xywh, _scale_letterbox, get_onnx_device, _laplacian_variance
+from animl.utils.general import (_normalize_boxes, _xyxy2xywh, _scale_letterbox, get_onnx_device, 
+                                 _laplacian_variance, non_max_suppression)
 from animl.utils.visualization import MD_LABELS
 
 
-def load_detector(model_path: str, model_type: str = "megadetector", device: Optional[str] = None):
+def load_detector(model_path: str, 
+                  model_type: str = "megadetector_v1000",
+                  device: Optional[str] = None):
     """
     Load Detector model from filepath.
 
     Args:
         model_path (str): path to model file
-        model_type (str): type of model expected ["megadetector", "yolo", "miewid"]
+        model_type (str): type of model expected ["megadetector_v1000", "megadetector_v5", "yolo", "miewid"]
         device (str): specify to run on cpu or gpu
 
     Returns:
@@ -50,7 +53,7 @@ def detect(detector,
            category_map: Optional[dict] = MD_LABELS,
            confidence_threshold: float = 0.1,
            calculate_clarity: bool = False,
-           batch_size: int = 8,
+           batch_size: int = 1,
            prefetch_size: int = 2,
            num_workers: int = 2,
            use_progress_bar: bool = True,
@@ -205,12 +208,14 @@ def _convert_detections(predictions: list,
                         batch_from_dataloader: list,
                         letterbox: bool,
                         confidence_threshold: float = 0.1,
-                        model_type: str = 'megadetector',
+                        model_type: str = 'megadetector_v1000',
                         category_map: dict = MD_LABELS,
                         calculate_clarity=False) -> pd.DataFrame:
     # Converts output into nested list with categories, conf, and bboxes in expected format for parsing function.
     # Supports YOLOv5/MDv5, YOLOv6+, and ONNX models with either relative or absolute bounding box outputs.
     # If letterbox=True, rescales bboxes back to original image size.
+
+    MD_MODELS = ["megadetector", "megadetector_v1000", "megadetector_v5"]
 
     # unpack batch dataloader output
     image_tensors = batch_from_dataloader[0]
@@ -226,6 +231,10 @@ def _convert_detections(predictions: list,
 
     results = []
 
+    # Run non-max suppression for MegaDetector v5 models to filter overlapping detections
+    if model_type == "megadetector_v5":
+        predictions = non_max_suppression(predictions, conf_thres=confidence_threshold, iou_thres=0.45)
+
     for i, pred in enumerate(predictions):
 
         boxes = pred[:, :4]  # Bounding box coordinates
@@ -240,7 +249,7 @@ def _convert_detections(predictions: list,
                     'frame': int(image_frames[i]),
                     'max_detection_conf': max_detection_conf,
                     # for MD models, set category to 0 (empty) if no detections, for other models set to None
-                    'category': 0 if model_type == "megadetector" else None,
+                    'category': 0 if model_type in MD_MODELS else None,
                     'category_label': 'empty',
                     'detections': []}
             results.append(data)
@@ -261,7 +270,7 @@ def _convert_detections(predictions: list,
                     bbox = _scale_letterbox(bbox, image_tensors[i].shape[1:], image_sizes[i, :])
 
                 # increase md categories by 1
-                if model_type == "megadetector":
+                if model_type in MD_MODELS:
                     category[j] += 1
 
                 # build detection dict
