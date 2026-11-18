@@ -7,12 +7,6 @@ import numpy as np
 import onnxruntime as ort
 
 
-MEGADETECTORv5_SIZE = 1280
-SDZWA_CLASSIFIER_SIZE = 299
-
-MODEL_TYPES = {"megadetector", "yolo", "miewid", "classifier"}
-
-
 def softmax(x):
     '''
     Helper function to softmax
