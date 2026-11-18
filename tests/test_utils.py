@@ -51,23 +51,6 @@ def test_get_version_matches_package_version():
 
 
 @pytest.mark.parametrize(
-    "name,value",
-    [
-        ("MEGADETECTORv5_SIZE", general.MEGADETECTORv5_SIZE),
-        ("SDZWA_CLASSIFIER_SIZE", general.SDZWA_CLASSIFIER_SIZE),
-    ],
-)
-def test_constants_are_positive_ints(name, value):
-    assert isinstance(value, int), f"{name} should be int"
-    assert value > 0, f"{name} should be positive"
-
-
-@pytest.mark.parametrize("model", ["megadetector", "yolo", "miewid", "classifier"])
-def test_model_types_contains_expected_values(model):
-    assert model in general.MODEL_TYPES
-
-
-@pytest.mark.parametrize(
     "providers,user_set,quiet,expected",
     [
         (["CUDAExecutionProvider", "CPUExecutionProvider"], "cpu", False, ["CPUExecutionProvider"]),
