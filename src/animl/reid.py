@@ -4,6 +4,7 @@ Code to run Miew_ID and other re-identification models
 (https://github.com/WildMeOrg/wbia-plugin-miew-id)
 
 """
+from pathlib import Path
 from typing import Optional
 import pandas as pd
 import numpy as np
@@ -21,25 +22,27 @@ MEGADESCRIPTOR_L_SIZE = 384
 MEGADESCRIPTOR_L_NORMALIZE = {"mean": [0.5, 0.5, 0.5], "std": [0.5, 0.5, 0.5]}
 
 
-def load_ried(file_path: str,
+def load_ried(model_path: str,
               model_type: str,
               device: Optional[str] = None):
     """
     Load re-identification model from file path
 
     Args:
-        file_path (str): file path to model file
+        model_path (str): file path to model file
         device (str): device to load model to
         model_type (str): type of the re-identification model (e.g., "miewid", "megadescriptor_l")
 
     Returns:
         loaded re-identification model object
     """
-    device = get_onnx_device(user_set=device)
-    print(f'Sending model to {device}')
-    reid_model = ort.InferenceSession(file_path, providers=device)
-    reid_model.model_type = model_type
-    return reid_model
+    if not Path(model_path).is_file():
+        raise FileNotFoundError(f"Model file not found at {model_path}")
+
+    providers = get_onnx_device(user_set=device)
+    model = ort.InferenceSession(model_path, providers=providers)
+    model.model_type = model_type.lower()
+    return model
 
 
 def extract_reid_embeddings(model,
