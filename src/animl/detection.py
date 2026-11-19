@@ -215,7 +215,7 @@ def _convert_detections(predictions: list,
     # Supports YOLOv5/MDv5, YOLOv6+, and ONNX models with either relative or absolute bounding box outputs.
     # If letterbox=True, rescales bboxes back to original image size.
 
-    MD_MODELS = ["megadetector", "megadetector_v1000", "megadetector_v5"]
+    MD_MODELS = ["megadetector", "megadetector_v1000", "megadetector_v5", "megadetector_v5a", "megadetector_v5b"]
 
     # unpack batch dataloader output
     image_tensors = batch_from_dataloader[0]
@@ -232,7 +232,7 @@ def _convert_detections(predictions: list,
     results = []
 
     # Run non-max suppression for MegaDetector v5 models to filter overlapping detections
-    if model_type == "megadetector_v5":
+    if model_type in ["megadetector_v5", "megadetector_v5a", "megadetector_v5b"]:
         predictions = non_max_suppression(predictions, conf_thres=confidence_threshold, iou_thres=0.45)
 
     for i, pred in enumerate(predictions):
