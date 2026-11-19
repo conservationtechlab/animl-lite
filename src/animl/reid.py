@@ -23,7 +23,6 @@ MEGADESCRIPTOR_L_NORMALIZE = {"mean": [0.5, 0.5, 0.5], "std": [0.5, 0.5, 0.5]}
 
 
 def load_reid(model_path: str,
-              model_type: str,
               device: Optional[str] = None):
     """
     Load re-identification model from file path
@@ -41,7 +40,6 @@ def load_reid(model_path: str,
 
     providers = get_onnx_device(user_set=device)
     model = ort.InferenceSession(model_path, providers=providers)
-    model.model_type = model_type.lower()
     return model
 
 
