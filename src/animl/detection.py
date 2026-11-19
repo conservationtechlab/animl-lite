@@ -56,7 +56,7 @@ def detect(detector,
            batch_size: int = 1,
            prefetch_size: int = 2,
            num_workers: int = 2,
-           use_progress_bar: bool = True,
+           quiet: bool = True,
            checkpoint_path: Optional[str] = None,
            checkpoint_frequency: int = -1,) -> list[dict]:
     """
@@ -76,7 +76,7 @@ def detect(detector,
         batch_size (int): number of images per batch
         prefetch_size (int): number of batches to prefetch
         num_workers (int): number of worker threads for data loading
-        use_progress_bar (bool): whether to display a progress bar
+        quiet (bool): if True, suppress the progress bar
         device (str): specify to run on cpu or gpu
         checkpoint_path (str): path to checkpoint file
         checkpoint_frequency (int): write results to checkpoint file every N images
@@ -100,7 +100,7 @@ def detect(detector,
                                        batch_size=batch_size,
                                        prefetch_size=prefetch_size,
                                        num_workers=num_workers,
-                                       use_progress_bar=use_progress_bar)
+                                       quiet=quiet)
 
         input_name = detector.get_inputs()[0].name
         outputs = detector.run(None, {input_name: dataloader[0]})[0]
@@ -167,7 +167,7 @@ def detect(detector,
                                    batch_size=batch_size,
                                    prefetch_size=prefetch_size,
                                    num_workers=num_workers,
-                                   use_progress_bar=use_progress_bar)
+                                   quiet=quiet)
 
     start_time = time.time()
     for batch in dataloader:
@@ -196,7 +196,7 @@ def detect(detector,
             print('Writing a new checkpoint after having processed {} images since last restart'.format(count))
             _save_detection_checkpoint(checkpoint_path, results)
 
-    if use_progress_bar:
+    if not quiet:
         print(f"\nFinished detection. Total images processed: {len(results)} at {round(len(results)/(time.time() - start_time), 1)} img/s.")
     if checkpoint_path:
         _save_detection_checkpoint(checkpoint_path, results)
@@ -307,7 +307,7 @@ def parse_detections(detections: list[dict],
                      threshold: float = 0,
                      file_col: str = "filepath",
                      score: bool = False,
-                     use_progress_bar: bool = False) -> pd.DataFrame:
+                     quiet: bool = True) -> pd.DataFrame:
     """
     Converts listed output from detector to DataFrame.
 
@@ -340,7 +340,7 @@ def parse_detections(detections: list[dict],
         return file_management.load_data(out_file)
 
     lst = []
-    for frame in tqdm(detections, disable=not use_progress_bar):
+    for frame in tqdm(detections, disable=quiet):
         try:
             frame_detections = frame['detections']
         except KeyError:
