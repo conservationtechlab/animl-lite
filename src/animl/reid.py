@@ -22,7 +22,7 @@ MEGADESCRIPTOR_L_SIZE = 384
 MEGADESCRIPTOR_L_NORMALIZE = {"mean": [0.5, 0.5, 0.5], "std": [0.5, 0.5, 0.5]}
 
 
-def load_ried(model_path: str,
+def load_reid(model_path: str,
               model_type: str,
               device: Optional[str] = None):
     """
