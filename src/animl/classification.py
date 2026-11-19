@@ -86,7 +86,7 @@ def classify(model,
              prefetch_size: int = 2,
              num_workers: int = 2,
              out_file: Optional[str] = None,
-             use_progress_bar: bool = True):
+             quiet: bool = True):
     """
     TODO: align with R version
     Predict species using classifier model.
@@ -129,7 +129,7 @@ def classify(model,
                                               batch_size=batch_size,
                                               prefetch_size=prefetch_size,
                                               num_workers=num_workers,  # 4 threads for loading
-                                              use_progress_bar=use_progress_bar)
+                                              quiet=quiet)
 
     # Single File
     elif isinstance(detections, str):
@@ -144,7 +144,7 @@ def classify(model,
                                               batch_size=batch_size,
                                               prefetch_size=prefetch_size,
                                               num_workers=num_workers,
-                                              use_progress_bar=use_progress_bar)
+                                              quiet=quiet)
     # List of Files
     elif isinstance(detections, list):
         detections = pd.DataFrame({file_col: detections, 'frame': 0}, index=range(len(detections)))
@@ -158,7 +158,7 @@ def classify(model,
                                               batch_size=batch_size,
                                               prefetch_size=prefetch_size,
                                               num_workers=num_workers,
-                                              use_progress_bar=use_progress_bar)
+                                              quiet=quiet)
     else:
         raise AssertionError("Input must be a data frame of crops, single file path or vector of file paths.")
 

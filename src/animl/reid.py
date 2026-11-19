@@ -51,7 +51,7 @@ def extract_reid_embeddings(model,
                             batch_size: int = 1,
                             prefetch_size: int = 2,
                             num_workers: int = 2,
-                            use_progress_bar: bool = False):
+                            quiet: bool = True):
     """
     Wrapper for re-identification embedding extraction
 
@@ -62,7 +62,7 @@ def extract_reid_embeddings(model,
         batch_size (int): number of images per batch
         prefetch_size (int): number of batches to prefetch
         num_workers (int): number of worker threads for data loading
-        use_progress_bar (bool): whether to display a progress bar
+        quiet (bool): if True, suppress the progress bar
 
     Returns:
         output (np.ndarray): array of extracted embeddings
@@ -82,7 +82,7 @@ def extract_reid_embeddings(model,
                                        batch_size=batch_size,
                                        prefetch_size=prefetch_size,
                                        num_workers=num_workers,
-                                       use_progress_bar=use_progress_bar)
+                                       quiet=quiet)
         for batch_images, _, _, _ in dataloader:
             outputs = model.run(None, {model.get_inputs()[0].name: batch_images})
             output.extend(outputs)
