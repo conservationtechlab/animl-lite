@@ -49,7 +49,7 @@ def model_spec(request):
     spec = MODELS[name]
     if not spec["path"].is_file():
         pytest.skip(f"model fixture missing: {spec['path']}")
-    model = reid.load_ried(str(spec["path"]), model_type=name, device="cpu")
+    model = reid.load_reid(str(spec["path"]), device="cpu")
     return {"name": name, "model": model, **spec}
 
 
@@ -86,21 +86,15 @@ def _extract(spec, manifest, **kwargs):
                                         **kwargs)
 
 
-def test_load_ried_missing_file(tmp_path: Path):
+def test_load_reid_missing_file(tmp_path: Path):
     with pytest.raises(FileNotFoundError):
-        reid.load_ried(str(tmp_path / "missing.onnx"), model_type="miewid")
+        reid.load_reid(str(tmp_path / "missing.onnx"))
 
 
-def test_load_ried_sets_model_type_and_input_shape(model_spec):
+def test_load_reid_input_shape(model_spec):
     model = model_spec["model"]
-    assert model.model_type == model_spec["name"]
     shape = model.get_inputs()[0].shape
     assert shape[1:] == [3, model_spec["size"], model_spec["size"]]
-
-
-def test_load_ried_lowercases_model_type(model_spec):
-    model = reid.load_ried(str(model_spec["path"]), model_type=model_spec["name"].upper(), device="cpu")
-    assert model.model_type == model_spec["name"]
 
 
 def test_extract_embeddings_shape_and_values(model_spec, reid_manifest):

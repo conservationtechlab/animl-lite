@@ -39,8 +39,7 @@ from animl.utils import (MD_COLORS, MD_LABELS, animlr, check_exiftool,
                          get_version, non_max_suppression,
                          plot_all_bounding_boxes, plot_box, softmax,
                          visualization,)
-from animl.video_processing import (extract_frames, get_fps_from_ffmpeg,
-                                    get_frame_as_image, get_images,
+from animl.video_processing import (extract_frames, get_frame_as_image, get_images,
                                     get_videos,)
 
 __all__ = ['IMAGE_EXTENSIONS', 'MD_COLORS', 'MD_LABELS',
@@ -57,7 +56,7 @@ __all__ = ['IMAGE_EXTENSIONS', 'MD_COLORS', 'MD_LABELS',
            'export_megadetector', 'export_timelapse', 'export_yolo',
            'extract_frames', 'extract_reid_embeddings', 'file_management',
            'from_config', 'from_paths', 'general', 'generator', 'get_animals',
-           'get_empty', 'get_fps_from_ffmpeg', 'get_frame_as_image',
+           'get_empty', 'get_frame_as_image',
            'get_images', 'get_onnx_device', 'get_version', 'get_videos',
            'load_class_list', 'load_classifier', 'load_data', 'load_detector',
            'load_json', 'load_reid', 'load_yaml', 'non_max_suppression',
