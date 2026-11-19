@@ -19,7 +19,6 @@ import threading
 import queue
 
 from animl.file_management import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
-from animl.utils.general import SDZWA_CLASSIFIER_SIZE
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -34,8 +33,8 @@ class ManifestGenerator:
     '''
     def __init__(self, 
                  manifest: pd.DataFrame,
-                 resize_height: int = SDZWA_CLASSIFIER_SIZE,
-                 resize_width: int = SDZWA_CLASSIFIER_SIZE,
+                 resize_height: int,
+                 resize_width: int,
                  file_col: str = "filepath",
                  crop: bool = True,
                  crop_coord: str = 'relative',
