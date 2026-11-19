@@ -147,7 +147,7 @@ def detect(detector,
     if checkpoint_path and file_management.check_file(checkpoint_path, output_type="Megadetector raw output"):
         results = file_management.load_json(checkpoint_path).get('images')
         already_processed = set([r['filepath'] for r in results])
-        manifest = image_file_names[~image_file_names[file_col].isin(already_processed)][[file_col, 'frame']].reset_index(drop=True)
+        manifest = manifest[~manifest[file_col].isin(already_processed)][[file_col, 'frame']].reset_index(drop=True)
         if manifest.empty:
             print("All images have already been processed. Exiting.")
             return results
