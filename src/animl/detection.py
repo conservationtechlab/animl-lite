@@ -23,7 +23,8 @@ from animl.utils.visualization import MD_LABELS
 
 def load_detector(model_path: str, 
                   model_type: str = "megadetector_v1000",
-                  device: Optional[str] = None):
+                  device: Optional[str] = None,
+                  quiet: bool = True):
     """
     Load Detector model from filepath.
 
@@ -31,6 +32,7 @@ def load_detector(model_path: str,
         model_path (str): path to model file
         model_type (str): type of model expected ["megadetector_v1000", "megadetector_v5", "yolo", "miewid"]
         device (str): specify to run on cpu or gpu
+        quiet (bool): if True, suppresses output messages
 
     Returns:
         object: loaded model object
@@ -38,7 +40,7 @@ def load_detector(model_path: str,
     if not Path(model_path).is_file():
         raise FileNotFoundError(f"Model file not found at {model_path}")
 
-    providers = get_onnx_device(user_set=device)
+    providers = get_onnx_device(user_set=device, quiet=quiet)
     model = ort.InferenceSession(model_path, providers=providers)
     model.model_type = model_type.lower()
     return model

@@ -23,7 +23,8 @@ MEGADESCRIPTOR_L_NORMALIZE = {"mean": [0.5, 0.5, 0.5], "std": [0.5, 0.5, 0.5]}
 
 
 def load_reid(model_path: str,
-              device: Optional[str] = None):
+              device: Optional[str] = None,
+              quiet: bool = True):
     """
     Load re-identification model from file path
 
@@ -38,7 +39,7 @@ def load_reid(model_path: str,
     if not Path(model_path).is_file():
         raise FileNotFoundError(f"Model file not found at {model_path}")
 
-    providers = get_onnx_device(user_set=device)
+    providers = get_onnx_device(user_set=device, quiet=quiet)
     model = ort.InferenceSession(model_path, providers=providers)
     return model
 

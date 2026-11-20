@@ -17,7 +17,8 @@ from animl.utils.general import get_onnx_device, softmax
 
 def load_classifier(model_path: str,
                     classes: Union[int, str, Path, pd.DataFrame] = None,
-                    device: Optional[str] = None):
+                    device: Optional[str] = None,
+                    quiet: bool = True):
     '''
     Creates a model instance and loads the latest model state weights.
 
@@ -33,10 +34,12 @@ def load_classifier(model_path: str,
     '''
     class_list = None
     model_path = Path(model_path)
+    if not quiet:
+        print(f'Loading model at {model_path}')
     # check to make sure GPU is available if chosen
-    providers = get_onnx_device(user_set=device)
+    providers = get_onnx_device(user_set=device, quiet=quiet)
 
-    print(f'Loading model at {model_path}')
+    
     model = onnxruntime.InferenceSession(model_path, providers=providers)
     model.model_type = "classifier"
 
@@ -50,7 +53,8 @@ def load_classifier(model_path: str,
     # try to load class dict from metadata
     props = model.get_modelmeta().custom_metadata_map
     if "class_dict" in props:
-        print("Loaded class_dict from ONNX metadata.")
+        if not quiet:
+            print("Loaded class_dict from ONNX metadata.")
         class_dict = json.loads(props["class_dict"])
         class_list = [class_dict[str(i)] for i in range(len(class_dict))]
         class_list = pd.DataFrame({'class': class_list})
