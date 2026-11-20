@@ -2,9 +2,61 @@
 General utils
 
 """
+import ctypes
+import functools
+import os
+import sys
+
 import cv2
 import numpy as np
 import onnxruntime as ort
+
+
+@functools.cache
+def cuda_usable():
+    """
+    Return True only if ONNX Runtime can actually run on a CUDA GPU here.
+
+    Called by get_onnx_device() and check_onnx_cuda(). Callers should use those
+    rather than ort.get_available_providers() directly, because that function
+    lists every provider onnxruntime-gpu was *built* with. It reports CUDA even
+    on machines with no GPU, no driver, or no CUDA/cuDNN libraries. In those
+    cases ORT logs a red "Failed to load libonnxruntime_providers_cuda" error
+    on every session and quietly falls back to CPU.
+
+    Kept as a separate cached function rather than inlined in get_onnx_device
+    because it loads shared libraries and initialises the CUDA driver. That
+    should happen once per process, not on every model load.
+
+    Steps:
+      1. preload_dlls() loads the CUDA 12 / cuDNN 9 libraries from the
+         nvidia-*-cu12 pip packages, if installed. ORT's CUDA provider has no
+         RUNPATH to site-packages, so it can't find them by itself.
+      2. Load ORT's CUDA provider library. If any of its CUDA/cuDNN dependencies
+         are missing, this raises OSError.
+      3. Ask the NVIDIA driver how many GPUs it sees. This catches machines
+         that have the libraries but no driver or no GPU.
+    """
+    if 'CUDAExecutionProvider' not in ort.get_available_providers():
+        return False  # CPU-only onnxruntime build (e.g. macOS)
+
+    try:
+        ort.preload_dlls()
+    except Exception:
+        pass  # fall back to system libs / LD_LIBRARY_PATH
+
+    win = sys.platform == 'win32'
+    capi = os.path.join(os.path.dirname(ort.__file__), 'capi')
+    provider = 'onnxruntime_providers_cuda.dll' if win else 'libonnxruntime_providers_cuda.so'
+    try:
+        ctypes.CDLL(os.path.join(capi, provider))
+        driver = ctypes.WinDLL('nvcuda.dll') if win else ctypes.CDLL('libcuda.so.1')
+        count = ctypes.c_int(0)
+        if driver.cuInit(0) != 0 or driver.cuDeviceGetCount(ctypes.byref(count)) != 0:
+            return False
+        return count.value > 0
+    except OSError:
+        return False
 
 
 def softmax(x):
@@ -18,14 +70,12 @@ def get_onnx_device(user_set=None, quiet=False):
     """
     Get gpu if available
     """
-    providers = ort.get_available_providers()
-    
-    if 'CUDAExecutionProvider' in providers:
+    if cuda_usable():
         # user selects cuda device and is available
         if user_set in ['cpu', 'CPUExecutionProvider']:
+            providers = ['CPUExecutionProvider']
             if not quiet:
                 print('CUDA is available but set to cpu by user.')
-                providers = ['CPUExecutionProvider']
         # user selects cuda device and is available
         elif user_set in ['CUDAExecutionProvider', 'cuda', 'cuda:0', 'cuda:1', 'cuda:2', 'cuda:3']:
             device_number = int(user_set.split(':')[-1]) if ':' in user_set else 0
@@ -34,22 +84,26 @@ def get_onnx_device(user_set=None, quiet=False):
                 print(f'Attempting to use CUDA device: {user_set}')
         # no user input
         elif user_set is None:
+            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']     
             if not quiet:
                 print('Using available CUDA device.')
-            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']     
         # unknown user input
         else:
+            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
             if not quiet:
                 print('User-specified device unknown, using available CUDA device.')
-            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
 
     # cuda not available
     else:
+        # CoreML/MPS not compatible at this time
+        providers = ['CPUExecutionProvider']
+        # warn user if they specified cuda but it is not available
         if user_set is not None and user_set in ['cuda', 'cuda:0', 'cuda:1', 'cuda:2', 'cuda:3']:
             if not quiet:
                 print('Warning: CUDA device specified but not available, using CPU instead.')
-        # CoreML/MPS not compatible at this time
-        providers = ['CPUExecutionProvider']
+        else:
+            if not quiet:
+                print('Using CPU device.')
        
     return providers
  
