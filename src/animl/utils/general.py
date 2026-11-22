@@ -107,13 +107,15 @@ class ScoreWeights:
     clarity: float = 0.25
 
     def __post_init__(self):
-        for f in fields(self):
-            value = getattr(self, f.name)
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
-                raise ValueError(f"score weight '{f.name}' must be a finite number >= 0, got {value!r}")
-        total = self.conf + self.area + self.aspect + self.clarity
-        if not math.isclose(total, 1.0, abs_tol=1e-6):
-            raise ValueError(f"score weights must sum to 1 so scores stay between 0 and 1, got {total:g}")
+        weights = [self.conf, self.area, self.aspect, self.clarity]
+        #checks to see if weights are non negative int/float
+        for value in weights:
+            if not isinstance(value, (int, float)) or isinstance(value, bool) or value <0:
+                raise ValueError("Weights must be non-negative numbers")
+
+        #checks that weights add up to 1, otherwise raise value error
+        if not(0.999999 <= sum(weights) <= 1.000001):
+            raise ValueError("Weights must sum to 1")    
 
     @classmethod
     def from_dict(cls, weights):
