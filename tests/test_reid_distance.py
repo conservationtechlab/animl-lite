@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from animl.reid.distance import (
+from animl.reid import (
     compute_batched_distance_matrix,
     compute_distance_matrix,
     cosine_distance,

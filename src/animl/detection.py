@@ -18,18 +18,22 @@ from animl import file_management
 from animl.generator import ManifestGenerator
 from animl.utils.general import (_normalize_boxes, _xyxy2xywh, _scale_letterbox, get_onnx_device,
                                  _crop_clarity, _frame_score, _normalize_aspect_mode,
-                                 _coerce_weights, ScoreWeights)
+                                 _coerce_weights, ScoreWeights, non_max_suppression)
 from animl.utils.visualization import MD_LABELS
 
 
-def load_detector(model_path: str, model_type: str = "megadetector", device: Optional[str] = None):
+def load_detector(model_path: str, 
+                  model_type: str = "megadetector_v1000",
+                  device: Optional[str] = None,
+                  quiet: bool = True):
     """
     Load Detector model from filepath.
 
     Args:
         model_path (str): path to model file
-        model_type (str): type of model expected ["megadetector", "yolo", "miewid"]
+        model_type (str): type of model expected ["megadetector_v1000", "megadetector_v5", "yolo", "miewid"]
         device (str): specify to run on cpu or gpu
+        quiet (bool): if True, suppresses output messages
 
     Returns:
         object: loaded model object
@@ -37,7 +41,7 @@ def load_detector(model_path: str, model_type: str = "megadetector", device: Opt
     if not Path(model_path).is_file():
         raise FileNotFoundError(f"Model file not found at {model_path}")
 
-    providers = get_onnx_device(user_set=device)
+    providers = get_onnx_device(user_set=device, quiet=quiet)
     model = ort.InferenceSession(model_path, providers=providers)
     model.model_type = model_type.lower()
     return model
@@ -54,10 +58,10 @@ def detect(detector,
            calculate_clarity: bool = False,
            aspect_mode: Optional[str] = None,
            score_weights: Optional[ScoreWeights] = None,
-           batch_size: int = 8,
+           batch_size: int = 1,
            prefetch_size: int = 2,
            num_workers: int = 2,
-           use_progress_bar: bool = True,
+           quiet: bool = True,
            checkpoint_path: Optional[str] = None,
            checkpoint_frequency: int = -1,) -> list[dict]:
     """
@@ -83,7 +87,7 @@ def detect(detector,
         batch_size (int): number of images per batch
         prefetch_size (int): number of batches to prefetch
         num_workers (int): number of worker threads for data loading
-        use_progress_bar (bool): whether to display a progress bar
+        quiet (bool): if True, suppress the progress bar
         device (str): specify to run on cpu or gpu
         checkpoint_path (str): path to checkpoint file
         checkpoint_frequency (int): write results to checkpoint file every N images
@@ -107,7 +111,7 @@ def detect(detector,
                                        batch_size=batch_size,
                                        prefetch_size=prefetch_size,
                                        num_workers=num_workers,
-                                       use_progress_bar=use_progress_bar)
+                                       quiet=quiet)
 
         input_name = detector.get_inputs()[0].name
         outputs = detector.run(None, {input_name: dataloader[0]})[0]
@@ -154,7 +158,7 @@ def detect(detector,
     if checkpoint_path and file_management.check_file(checkpoint_path, output_type="Megadetector raw output"):
         results = file_management.load_json(checkpoint_path).get('images')
         already_processed = set([r['filepath'] for r in results])
-        manifest = image_file_names[~image_file_names[file_col].isin(already_processed)][[file_col, 'frame']].reset_index(drop=True)
+        manifest = manifest[~manifest[file_col].isin(already_processed)][[file_col, 'frame']].reset_index(drop=True)
         if manifest.empty:
             print("All images have already been processed. Exiting.")
             return results
@@ -174,7 +178,7 @@ def detect(detector,
                                    batch_size=batch_size,
                                    prefetch_size=prefetch_size,
                                    num_workers=num_workers,
-                                   use_progress_bar=use_progress_bar)
+                                   quiet=quiet)
 
     start_time = time.time()
     for batch in dataloader:
@@ -205,7 +209,7 @@ def detect(detector,
             print('Writing a new checkpoint after having processed {} images since last restart'.format(count))
             _save_detection_checkpoint(checkpoint_path, results)
 
-    if use_progress_bar:
+    if not quiet:
         print(f"\nFinished detection. Total images processed: {len(results)} at {round(len(results)/(time.time() - start_time), 1)} img/s.")
     if checkpoint_path:
         _save_detection_checkpoint(checkpoint_path, results)
@@ -217,7 +221,7 @@ def _convert_detections(predictions: list,
                         batch_from_dataloader: list,
                         letterbox: bool,
                         confidence_threshold: float = 0.1,
-                        model_type: str = 'megadetector',
+                        model_type: str = 'megadetector_v1000',
                         category_map: dict = MD_LABELS,
                         calculate_clarity=False,
                         aspect_mode: Optional[str] = None,
@@ -225,6 +229,8 @@ def _convert_detections(predictions: list,
     # Converts output into nested list with categories, conf, and bboxes in expected format for parsing function.
     # Supports YOLOv5/MDv5, YOLOv6+, and ONNX models with either relative or absolute bounding box outputs.
     # If letterbox=True, rescales bboxes back to original image size.
+
+    MD_MODELS = ["megadetector", "megadetector_v1000", "megadetector_v5", "megadetector_v5a", "megadetector_v5b"]
 
     # unpack batch dataloader output
     image_tensors = batch_from_dataloader[0]
@@ -243,6 +249,10 @@ def _convert_detections(predictions: list,
 
     results = []
 
+    # Run non-max suppression for MegaDetector v5 models to filter overlapping detections
+    if model_type in ["megadetector_v5", "megadetector_v5a", "megadetector_v5b"]:
+        predictions = non_max_suppression(predictions, conf_thres=confidence_threshold, iou_thres=0.45)
+
     for i, pred in enumerate(predictions):
 
         boxes = pred[:, :4]  # Bounding box coordinates
@@ -257,7 +267,7 @@ def _convert_detections(predictions: list,
                     'frame': int(image_frames[i]),
                     'max_detection_conf': max_detection_conf,
                     # for MD models, set category to 0 (empty) if no detections, for other models set to None
-                    'category': 0 if model_type == "megadetector" else None,
+                    'category': 0 if model_type in MD_MODELS else None,
                     'category_label': 'empty',
                     'detections': []}
             results.append(data)
@@ -280,7 +290,7 @@ def _convert_detections(predictions: list,
                     bbox = _scale_letterbox(bbox, image_tensors[i].shape[1:], image_sizes[i, :])
 
                 # increase md categories by 1
-                if model_type == "megadetector":
+                if model_type in MD_MODELS:
                     category[j] += 1
 
                 # build detection dict
@@ -319,7 +329,7 @@ def parse_detections(detections: list[dict],
                      threshold: float = 0,
                      file_col: str = "filepath",
                      score: bool = False,
-                     use_progress_bar: bool = False) -> pd.DataFrame:
+                     quiet: bool = True) -> pd.DataFrame:
     """
     Converts listed output from detector to DataFrame.
 
@@ -352,7 +362,7 @@ def parse_detections(detections: list[dict],
         return file_management.load_data(out_file)
 
     lst = []
-    for frame in tqdm(detections, disable=not use_progress_bar):
+    for frame in tqdm(detections, disable=quiet):
         try:
             frame_detections = frame['detections']
         except KeyError:

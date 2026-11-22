@@ -19,7 +19,6 @@ import threading
 import queue
 
 from animl.file_management import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
-from animl.utils.general import SDZWA_CLASSIFIER_SIZE
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -34,8 +33,8 @@ class ManifestGenerator:
     '''
     def __init__(self, 
                  manifest: pd.DataFrame,
-                 resize_height: int = SDZWA_CLASSIFIER_SIZE,
-                 resize_width: int = SDZWA_CLASSIFIER_SIZE,
+                 resize_height: int,
+                 resize_width: int,
                  file_col: str = "filepath",
                  crop: bool = True,
                  crop_coord: str = 'relative',
@@ -45,7 +44,7 @@ class ManifestGenerator:
                  prefetch_size: int = 2,
                  num_workers: int = 2,
                  dtype: np.dtype = np.float32,
-                 use_progress_bar: bool = False) -> None:
+                 quiet: bool = True) -> None:
 
         self.manifest = manifest.reset_index(drop=True)
         self.file_col = file_col
@@ -59,7 +58,7 @@ class ManifestGenerator:
         self.prefetch_size = max(1, prefetch_size)
         self.num_workers = max(0, num_workers)
         self.dtype = dtype
-        self.use_progress_bar = use_progress_bar
+        self.quiet = quiet
         
         self._validate_config()
         
@@ -101,7 +100,7 @@ class ManifestGenerator:
         '''Single-threaded batch iteration.'''
         try:
             iterator = range(len(self.manifest))
-            if self.use_progress_bar:
+            if not self.quiet:
                 try:
                     from tqdm import tqdm
                     iterator = tqdm(iterator, desc="Loading batches", unit="batch")
@@ -133,7 +132,7 @@ class ManifestGenerator:
         try:
             batch_count = 0
             iterator = range(len(self))
-            if self.use_progress_bar:
+            if not self.quiet:
                 try:
                     from tqdm import tqdm
                     iterator = tqdm(iterator, desc="Loading batches", unit="batch")

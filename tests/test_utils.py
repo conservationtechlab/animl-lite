@@ -51,27 +51,10 @@ def test_get_version_matches_package_version():
 
 
 @pytest.mark.parametrize(
-    "name,value",
-    [
-        ("MEGADETECTORv5_SIZE", general.MEGADETECTORv5_SIZE),
-        ("SDZWA_CLASSIFIER_SIZE", general.SDZWA_CLASSIFIER_SIZE),
-    ],
-)
-def test_constants_are_positive_ints(name, value):
-    assert isinstance(value, int), f"{name} should be int"
-    assert value > 0, f"{name} should be positive"
-
-
-@pytest.mark.parametrize("model", ["megadetector", "yolo", "miewid", "classifier"])
-def test_model_types_contains_expected_values(model):
-    assert model in general.MODEL_TYPES
-
-
-@pytest.mark.parametrize(
     "providers,user_set,quiet,expected",
     [
         (["CUDAExecutionProvider", "CPUExecutionProvider"], "cpu", False, ["CPUExecutionProvider"]),
-        (["CUDAExecutionProvider", "CPUExecutionProvider"], "cpu", True, ["CUDAExecutionProvider", "CPUExecutionProvider"]),
+        (["CUDAExecutionProvider", "CPUExecutionProvider"], "cpu", True, ["CPUExecutionProvider"]),
         (
             ["CUDAExecutionProvider", "CPUExecutionProvider"],
             "cuda:1",
@@ -91,21 +74,29 @@ def test_model_types_contains_expected_values(model):
     ],
 )
 def test_get_onnx_device_variants(monkeypatch, providers, user_set, quiet, expected):
-    monkeypatch.setattr(general.ort, "get_available_providers", lambda: providers)
+    monkeypatch.setattr(general, "cuda_usable", lambda: "CUDAExecutionProvider" in providers)
     result = general.get_onnx_device(user_set=user_set, quiet=quiet)
     assert result == expected
 
 
 def test_check_onnx_cuda_true(monkeypatch):
-    fake_ort = types.SimpleNamespace(get_available_providers=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"])
-    monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
+    monkeypatch.setattr(general, "cuda_usable", lambda: True)
     assert animlr.check_onnx_cuda() is True
 
 
 def test_check_onnx_cuda_false(monkeypatch):
-    fake_ort = types.SimpleNamespace(get_available_providers=lambda: ["CPUExecutionProvider"])
-    monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
+    monkeypatch.setattr(general, "cuda_usable", lambda: False)
     assert animlr.check_onnx_cuda() is False
+
+
+def test_cuda_usable_false_on_cpu_only_build(monkeypatch):
+    # CPU-only onnxruntime (e.g. macOS) must short-circuit before touching any CUDA library
+    general.cuda_usable.cache_clear()
+    monkeypatch.setattr(general.ort, "get_available_providers", lambda: ["CPUExecutionProvider"])
+    try:
+        assert general.cuda_usable() is False
+    finally:
+        general.cuda_usable.cache_clear()
 
 
 def test_check_exiftool_success(monkeypatch):

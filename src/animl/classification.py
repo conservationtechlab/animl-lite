@@ -17,7 +17,8 @@ from animl.utils.general import get_onnx_device, softmax
 
 def load_classifier(model_path: str,
                     classes: Union[int, str, Path, pd.DataFrame] = None,
-                    device: Optional[str] = None):
+                    device: Optional[str] = None,
+                    quiet: bool = True):
     '''
     Creates a model instance and loads the latest model state weights.
 
@@ -33,10 +34,12 @@ def load_classifier(model_path: str,
     '''
     class_list = None
     model_path = Path(model_path)
+    if not quiet:
+        print(f'Loading model at {model_path}')
     # check to make sure GPU is available if chosen
-    providers = get_onnx_device(user_set=device)
+    providers = get_onnx_device(user_set=device, quiet=quiet)
 
-    print(f'Loading model at {model_path}')
+    
     model = onnxruntime.InferenceSession(model_path, providers=providers)
     model.model_type = "classifier"
 
@@ -50,7 +53,8 @@ def load_classifier(model_path: str,
     # try to load class dict from metadata
     props = model.get_modelmeta().custom_metadata_map
     if "class_dict" in props:
-        print("Loaded class_dict from ONNX metadata.")
+        if not quiet:
+            print("Loaded class_dict from ONNX metadata.")
         class_dict = json.loads(props["class_dict"])
         class_list = [class_dict[str(i)] for i in range(len(class_dict))]
         class_list = pd.DataFrame({'class': class_list})
@@ -76,17 +80,17 @@ def load_class_list(classlist_file):
 
 def classify(model,
              detections,
-             resize_width: int = generator.SDZWA_CLASSIFIER_SIZE,
-             resize_height: int = generator.SDZWA_CLASSIFIER_SIZE,
+             resize_width,
+             resize_height,
              file_col: str = 'filepath',
              crop: bool = True,
              normalize: bool = True,
              letterbox: bool = False,
-             batch_size: int = 16,
+             batch_size: int = 1,
              prefetch_size: int = 2,
              num_workers: int = 2,
              out_file: Optional[str] = None,
-             use_progress_bar: bool = True):
+             quiet: bool = True):
     """
     TODO: align with R version
     Predict species using classifier model.
@@ -129,7 +133,7 @@ def classify(model,
                                               batch_size=batch_size,
                                               prefetch_size=prefetch_size,
                                               num_workers=num_workers,  # 4 threads for loading
-                                              use_progress_bar=use_progress_bar)
+                                              quiet=quiet)
 
     # Single File
     elif isinstance(detections, str):
@@ -144,7 +148,7 @@ def classify(model,
                                               batch_size=batch_size,
                                               prefetch_size=prefetch_size,
                                               num_workers=num_workers,
-                                              use_progress_bar=use_progress_bar)
+                                              quiet=quiet)
     # List of Files
     elif isinstance(detections, list):
         detections = pd.DataFrame({file_col: detections, 'frame': 0}, index=range(len(detections)))
@@ -158,7 +162,7 @@ def classify(model,
                                               batch_size=batch_size,
                                               prefetch_size=prefetch_size,
                                               num_workers=num_workers,
-                                              use_progress_bar=use_progress_bar)
+                                              quiet=quiet)
     else:
         raise AssertionError("Input must be a data frame of crops, single file path or vector of file paths.")
 

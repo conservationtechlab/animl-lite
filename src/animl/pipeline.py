@@ -7,7 +7,11 @@ import pandas as pd
 
 from animl import (classification, detection, export, file_management, video_processing)
 from animl.utils import visualization
-from animl.utils.general import MEGADETECTORv5_SIZE, SDZWA_CLASSIFIER_SIZE, get_onnx_device
+from animl.utils.general import get_onnx_device
+
+
+MEGADETECTORv5_SIZE = 1280
+SDZWA_CLASSIFIER_SIZE = 299
 
 
 def from_paths(image_dir: str,
@@ -52,12 +56,12 @@ def from_paths(image_dir: str,
     if (file_management.check_file(working_dir.detections, output_type="Detections")):
         detections = file_management.load_data(working_dir.detections)
     else:
-        detector = detection.load_detector(detector_file, "megadetector", device=device)
+        detector = detection.load_detector(detector_file, "megadetector_v5", device=device)
 
         md_results = detection.detect(detector,
                                       all_frames,
-                                      resize_height=MEGADETECTORv5_SIZE,
-                                      resize_width=MEGADETECTORv5_SIZE,
+                                      resize_height=1280,
+                                      resize_width=1280,
                                       checkpoint_path=working_dir.mdraw,
                                       checkpoint_frequency=1000)
         # Convert MD JSON to pandas dataframe, merge with manifest
