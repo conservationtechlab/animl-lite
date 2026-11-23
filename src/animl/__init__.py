@@ -11,6 +11,7 @@ from animl import utils
 from animl import video_processing
 
 from animl.classification import (classify, load_class_list, load_classifier,
+                                  load_failed_files, save_failed_files,
                                   sequence_classification,
                                   single_classification,)
 from animl.detection import (detect, get_animals, get_empty, load_detector,
@@ -59,10 +60,10 @@ __all__ = ['IMAGE_EXTENSIONS', 'MD_COLORS', 'MD_LABELS',
            'get_empty', 'get_frame_as_image',
            'get_images', 'get_onnx_device', 'get_version', 'get_videos',
            'load_class_list', 'load_classifier', 'load_data', 'load_detector',
-           'load_json', 'load_reid', 'load_yaml', 'non_max_suppression',
+           'load_failed_files', 'load_json', 'load_reid', 'load_yaml', 'non_max_suppression',
            'parse_detections', 'pipeline', 'plot_all_bounding_boxes',
            'plot_box', 'reid', 'remove_diagonal', 'remove_link', 'save_data',
-           'save_json', 'save_yaml', 'sequence_calculation',
+           'save_failed_files', 'save_json', 'save_yaml', 'sequence_calculation',
            'sequence_classification', 'single_classification', 'softmax',
            'update_labels_from_folders', 'utils', 'video_processing',
            'visualization']

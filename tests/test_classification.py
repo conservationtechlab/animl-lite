@@ -89,6 +89,15 @@ class TestFailedFiles:
         assert failed_files == ["video.mp4"]
         np.testing.assert_array_equal(predictions, [[0.2, 0.8]])
 
+    def test_save_and_load_failed_files(self, tmp_path):
+        out_file = str(tmp_path / "predictions.csv")
+        assert classification.load_failed_files(out_file) == []
+        classification.save_failed_files(out_file, ["a.jpg", "b.mp4"])
+        assert classification.load_failed_files(out_file) == ["a.jpg", "b.mp4"]
+        # no failures: the list from the earlier run no longer applies
+        classification.save_failed_files(out_file, [])
+        assert not (tmp_path / classification.FAILED_FILES_NAME).exists()
+
     def test_failed_files_saved_and_loaded_with_out_file(self, tmp_path, monkeypatch):
         manifest = _manifest(tmp_path, 2)
         missing = str(tmp_path / "missing.png")

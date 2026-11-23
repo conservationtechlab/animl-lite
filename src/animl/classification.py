@@ -103,17 +103,18 @@ def classify(model,
         file_col (str): column name containing file paths
         crop (bool): use bbox to crop images before feeding into model
         normalize (bool): normalize the tensor before inference
-        out_file (str): path to save prediction results to; the files that failed to load
-            are saved next to it, in classification_failed_files.txt
+        out_file (Optional[str]): path to save prediction results to; the files that failed
+            to load are saved next to it, in classification_failed_files.txt
 
     Returns:
         tuple of
-            np.ndarray: softmaxed predictions, one row per detection, in order, leaving out
-                every detection from the files in failed_files
-            list: files that failed to load, as in animl-py
+            predictions (np.array): array of softmaxed logits for each class for each image
+            failed_files (list): files that failed to load, to pass on to
+                single_classification or sequence_classification
     """
+    # load from file if out_file provided and exists, with the files that failed to load then
     if file_management.check_file(out_file, output_type="Classification results"):
-        return file_management.load_data(out_file).to_numpy(), _load_failed_files(out_file)
+        return file_management.load_data(out_file).to_numpy(), load_failed_files(out_file)
 
     # Manifest
     if isinstance(detections, pd.DataFrame):
@@ -179,7 +180,7 @@ def classify(model,
 
     if out_file:
         file_management.save_data(pd.DataFrame(raw_output), out_file)
-        _save_failed_files(out_file, failed_files)
+        save_failed_files(out_file, failed_files)
 
     processed = len(raw_output)
     print(f"\nFinished classification. Total images processed: {processed} at {round(processed/(time() - start_time), 1)} img/s.")
@@ -212,20 +213,40 @@ def _split_failed(by_row: np.ndarray, filepaths: pd.Series):
     return by_row[keep], failed_files
 
 
-def _failed_files_path(out_file) -> Path:
-    return Path(out_file).parent / FAILED_FILES_NAME
+def save_failed_files(out_file: str, failed_files: list) -> None:
+    """
+    Save the files that failed to load during classification, next to out_file
 
+    classify calls this when given an out_file. When no files failed, a list saved
+    by an earlier run is removed, as its predictions were just overwritten.
 
-def _save_failed_files(out_file, failed_files: list) -> None:
-    path = _failed_files_path(out_file)
+    Args:
+        out_file (str): path the classification results are saved to
+        failed_files (list): files that failed to load during classification
+    """
+    path = Path(out_file).parent / FAILED_FILES_NAME
     if failed_files:
-        path.write_text("".join(f"{f}\n" for f in failed_files))
+        with path.open("w") as f:
+            for item in failed_files:
+                f.write(f"{item}\n")
     elif path.is_file():
-        path.unlink()  # from an earlier run whose predictions were just overwritten
+        path.unlink()
 
 
-def _load_failed_files(out_file) -> list:
-    path = _failed_files_path(out_file)
+def load_failed_files(out_file: str) -> list:
+    """
+    Load the files that failed to load during classification, saved next to out_file
+
+    Pass the result to single_classification or sequence_classification as
+    failed_files with predictions loaded from out_file.
+
+    Args:
+        out_file (str): path the classification results were saved to
+
+    Returns:
+        list of files that failed to load, empty if none were saved
+    """
+    path = Path(out_file).parent / FAILED_FILES_NAME
     return path.read_text().splitlines() if path.is_file() else []
 
 
