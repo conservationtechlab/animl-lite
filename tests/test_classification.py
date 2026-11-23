@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 from PIL import Image
 
-from animl.classification import classify, single_classification
+from animl.classification import classify, sequence_classification, single_classification
 
 
 class _FakeClassifier:
@@ -80,3 +80,37 @@ def test_single_classification_failed_rows_from_reticulate_dict():
     result = single_classification(animals, None, {"predictions": predictions, "failed_rows": [1.0]},
                                    ["cat", "dog", "bird"])
     assert result["filepath"].tolist() == ["a.jpg", "c.jpg"]
+
+
+def _animals(n=3):
+    return pd.DataFrame({
+        "filepath": [f"{i}.jpg" for i in range(n)],
+        "extension": [".jpg"] * n,
+        "conf": [0.9] * n,
+        "station": ["A"] * n,
+        "datetime": pd.to_datetime(["2023-01-01 10:00:00"] * n),
+    })
+
+
+@pytest.mark.parametrize("predictions,message", [
+    (np.full((2, 3), 1 / 3), "Number of predictions does not match"),
+    (np.full((3, 2), 0.5), "Number of classes in predictions does not match"),
+])
+def test_single_classification_checks_shape(predictions, message):
+    with pytest.raises(AssertionError, match=message):
+        single_classification(_animals(), None, predictions, ["cat", "dog", "bird"])
+
+
+def test_single_classification_count_checked_after_failed_rows_dropped():
+    predictions = np.full((3, 3), 1 / 3)  # sized for every row, but row 1 failed
+    with pytest.raises(AssertionError, match="Number of predictions does not match"):
+        single_classification(_animals(), None, (predictions, [1]), ["cat", "dog", "bird"])
+
+
+@pytest.mark.parametrize("predictions,message", [
+    (np.full((2, 3), 1 / 3), "Number of predictions does not match"),
+    (np.full((3, 2), 0.5), "Number of classes in predictions does not match"),
+])
+def test_sequence_classification_checks_shape(predictions, message):
+    with pytest.raises(AssertionError, match=message):
+        sequence_classification(_animals(), None, predictions, pd.Series(["cat", "dog", "bird"]), "station")
