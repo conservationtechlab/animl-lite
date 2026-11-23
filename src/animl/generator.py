@@ -64,8 +64,6 @@ class ManifestGenerator:
         
         # Memory pools for reuse
         self._img_pool = deque(maxlen=self.prefetch_size * 2)
-        self._batch_queue = queue.Queue(maxsize=self.prefetch_size)
-        self._stop_event = threading.Event()
         self._prefetch_thread = None
 
 
@@ -123,9 +121,13 @@ class ManifestGenerator:
     
     def _iter_with_prefetch(self) -> Generator:
         '''Multi-threaded iteration with async prefetching.'''
-        self._stop_event.clear()
+        # each iteration has its own queue and stop event, so a worker left over from an
+        # earlier, interrupted iteration can't put batches into this one
+        batch_queue = queue.Queue(maxsize=self.prefetch_size)
+        stop_event = threading.Event()
         self._prefetch_thread = threading.Thread(
             target=self._prefetch_worker,
+            args=(batch_queue, stop_event),
             daemon=True
         )
         self._prefetch_thread.start()
@@ -141,38 +143,41 @@ class ManifestGenerator:
                     pass
             
             for _ in iterator:
-                try:
-                    batch = self._batch_queue.get(timeout=30)
-                    if batch is None:  # Sentinel for end
-                        break
-                    yield batch
-                    batch_count += 1
-                except queue.Empty:
-                    print("Prefetch timeout - worker may be stuck")
+                # no timeout: a slow batch must not end the iteration, and the worker
+                # always puts a batch, the end sentinel or its error
+                batch = batch_queue.get()
+                if batch is None:  # Sentinel for end
                     break
+                if isinstance(batch, Exception):  # error in the worker
+                    raise batch
+                yield batch
+                batch_count += 1
         finally:
-            self._stop_event.set()
+            stop_event.set()
+            # empty the queue, so a worker waiting to put a batch can see stop_event and finish
+            while not batch_queue.empty():
+                batch_queue.get_nowait()
             if self._prefetch_thread:
                 self._prefetch_thread.join(timeout=5)
     
-    def _prefetch_worker(self) -> None:
+    def _prefetch_worker(self, batch_queue: queue.Queue, stop_event: threading.Event) -> None:
         '''Worker thread that prefetches batches.'''
         try:
             batch_indices = []
             for idx in range(len(self.manifest)):
-                if self._stop_event.is_set():
-                    break
+                if stop_event.is_set():
+                    return
                 
                 batch_indices.append(idx)
                 
                 if len(batch_indices) == self.batch_size or idx == len(self.manifest) - 1:
-                    self._batch_queue.put(self._load_batch(batch_indices))
+                    batch_queue.put(self._load_batch(batch_indices))
                     batch_indices = []
             
-            self._batch_queue.put(None)  # Sentinel
+            batch_queue.put(None)  # Sentinel
         except Exception as e:
-            print(f"Prefetch worker error: {e}")
-            self._batch_queue.put(None)
+            # hand the error to the consumer instead of ending the iteration as if it had finished
+            batch_queue.put(e)
     
     def _load_batch(self, indices: list) -> Tuple[Optional[Tuple], list]:
         '''Load a batch of samples, and list the manifest rows that failed to load.'''
