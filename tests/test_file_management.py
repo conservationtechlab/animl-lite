@@ -372,10 +372,16 @@ def test_build_file_manifest_unreadable_video_keeps_exiftool_for_the_rest(tmp_pa
     from unittest.mock import patch
 
     _write_videos(tmp_path, ["v1.mp4", "v2.mp4"])
+
+    def get_metadata(filepath):
+        # by name, as files are read in directory order, which differs between systems
+        if Path(filepath).name == "v1.mp4":
+            raise Exception("bad file")
+        return [{"QuickTime:CreateDate": "2024:01:02 03:04:05"}]
+
     with patch("animl.file_management.exiftool.ExifToolHelper") as helper:
         helper.return_value.running = True
-        helper.return_value.get_metadata.side_effect = [Exception("bad file"),
-                                                        [{"QuickTime:CreateDate": "2024:01:02 03:04:05"}]]
+        helper.return_value.get_metadata.side_effect = get_metadata
         result = file_management.build_file_manifest(str(tmp_path), exif=True)
     helper.assert_called_once()
     assert helper.return_value.get_metadata.call_count == 2
