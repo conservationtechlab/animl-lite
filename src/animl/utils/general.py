@@ -6,6 +6,7 @@ import ctypes
 import functools
 import os
 import sys
+import warnings
 
 import cv2
 import numpy as np
@@ -13,11 +14,11 @@ import onnxruntime as ort
 
 
 @functools.cache
-def cuda_usable():
+def cuda_device_count():
     """
-    Return True only if ONNX Runtime can actually run on a CUDA GPU here.
+    Return the number of CUDA GPUs ONNX Runtime can actually run on here, 0 if none.
 
-    Called by get_onnx_device() and check_onnx_cuda(). Callers should use those
+    Called by get_onnx_device() and cuda_usable(). Callers should use those
     rather than ort.get_available_providers() directly, because that function
     lists every provider onnxruntime-gpu was *built* with. It reports CUDA even
     on machines with no GPU, no driver, or no CUDA/cuDNN libraries. In those
@@ -35,10 +36,11 @@ def cuda_usable():
       2. Load ORT's CUDA provider library. If any of its CUDA/cuDNN dependencies
          are missing, this raises OSError.
       3. Ask the NVIDIA driver how many GPUs it sees. This catches machines
-         that have the libraries but no driver or no GPU.
+         that have the libraries but no driver or no GPU. The count follows
+         CUDA_VISIBLE_DEVICES, as ORT's device_id does.
     """
     if 'CUDAExecutionProvider' not in ort.get_available_providers():
-        return False  # CPU-only onnxruntime build (e.g. macOS)
+        return 0  # CPU-only onnxruntime build (e.g. macOS)
 
     try:
         ort.preload_dlls()
@@ -53,35 +55,53 @@ def cuda_usable():
         driver = ctypes.WinDLL('nvcuda.dll') if win else ctypes.CDLL('libcuda.so.1')
         count = ctypes.c_int(0)
         if driver.cuInit(0) != 0 or driver.cuDeviceGetCount(ctypes.byref(count)) != 0:
-            return False
-        return count.value > 0
+            return 0
+        return count.value
     except OSError:
-        return False
+        return 0
 
 
-def softmax(x):
-    '''
-    Helper function to softmax
-    '''
-    return np.exp(x)/np.sum(np.exp(x), axis=1, keepdims=True)
+def cuda_usable():
+    """
+    Return True only if ONNX Runtime can actually run on a CUDA GPU here.
+
+    Called by check_onnx_cuda(). See cuda_device_count() for how this is checked.
+    """
+    return cuda_device_count() > 0
+
+
+def _cuda_index(user_set):
+    """Device index from 'cuda' / 'cuda:N' / 'CUDAExecutionProvider', None for anything else"""
+    if user_set in ('cuda', 'CUDAExecutionProvider'):
+        return 0
+    if isinstance(user_set, str) and user_set.startswith('cuda:') and user_set[5:].isdigit():
+        return int(user_set[5:])
+    return None
 
 
 def get_onnx_device(user_set=None, quiet=False):
     """
     Get gpu if available
     """
-    if cuda_usable():
-        # user selects cuda device and is available
+    n_gpus = cuda_device_count()
+    device_number = _cuda_index(user_set)
+    if n_gpus > 0:
+        # user selects cpu
         if user_set in ['cpu', 'CPUExecutionProvider']:
             providers = ['CPUExecutionProvider']
             if not quiet:
                 print('CUDA is available but set to cpu by user.')
         # user selects cuda device and is available
-        elif user_set in ['CUDAExecutionProvider', 'cuda', 'cuda:0', 'cuda:1', 'cuda:2', 'cuda:3']:
-            device_number = int(user_set.split(':')[-1]) if ':' in user_set else 0
+        elif device_number is not None:
+            # the selected GPU doesn't exist, but others do: use the first rather than the CPU
+            if device_number >= n_gpus:
+                warnings.warn(f'CUDA device {device_number} was selected, but only {n_gpus} CUDA '
+                              f'device(s) are available (cuda:0 to cuda:{n_gpus - 1}). Using cuda:0.',
+                              RuntimeWarning, stacklevel=2)
+                device_number = 0
             providers = [('CUDAExecutionProvider', {'device_id': device_number}), 'CPUExecutionProvider']
             if not quiet:
-                print(f'Attempting to use CUDA device: {user_set}')
+                print(f'Attempting to use CUDA device: cuda:{device_number}')
         # no user input
         elif user_set is None:
             providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']     
@@ -98,7 +118,7 @@ def get_onnx_device(user_set=None, quiet=False):
         # CoreML/MPS not compatible at this time
         providers = ['CPUExecutionProvider']
         # warn user if they specified cuda but it is not available
-        if user_set is not None and user_set in ['cuda', 'cuda:0', 'cuda:1', 'cuda:2', 'cuda:3']:
+        if device_number is not None:
             if not quiet:
                 print('Warning: CUDA device specified but not available, using CPU instead.')
         else:
@@ -106,7 +126,36 @@ def get_onnx_device(user_set=None, quiet=False):
                 print('Using CPU device.')
        
     return providers
- 
+
+
+def create_onnx_session(model_path, providers):
+    """
+    Create an ONNX Runtime session, warning if CUDA was requested but not used
+
+    cuda_usable() checks that the CUDA libraries load and a GPU is present, but
+    the CUDA provider can still fail when the session is created (driver too old
+    for the CUDA runtime, an unsupported GPU, a device index that doesn't exist,
+    no free GPU memory). ONNX Runtime then runs on CPU, only logging an error,
+    so models run many times slower with no sign of why in a GUI or notebook.
+
+    The warning is not affected by quiet: it reports a problem, not progress.
+
+    Args:
+        model_path (str | Path): path to the .onnx file
+        providers (list): execution providers, as returned by get_onnx_device
+
+    Returns:
+        onnxruntime.InferenceSession
+    """
+    session = ort.InferenceSession(str(model_path), providers=providers)
+    requested = [p[0] if isinstance(p, tuple) else p for p in providers]
+    if 'CUDAExecutionProvider' in requested and 'CUDAExecutionProvider' not in session.get_providers():
+        warnings.warn(f'CUDA was requested for {model_path} but could not be used, running on CPU. '
+                      'Check that the NVIDIA driver, CUDA and cuDNN versions match onnxruntime-gpu.',
+                      RuntimeWarning, stacklevel=3)
+    return session
+
+
 # ==============================================================================
 # FRAME SELECTION
 # ==============================================================================
@@ -268,6 +317,18 @@ def _scale_letterbox(bbox, resized_shape, original_shape):
     xywh_coords = _xyxy2xywh(xyxy_coords)
 
     return xywh_coords
+
+
+# ==============================================================================
+# MODEL OUTPUT
+# ==============================================================================
+
+def softmax(x):
+    '''
+    Helper function to softmax
+    '''
+    return np.exp(x)/np.sum(np.exp(x), axis=1, keepdims=True)
+
 
 def _nms(boxes, scores, iou_thres):
     x1, y1, x2, y2 = boxes.T
