@@ -90,7 +90,7 @@ class ManifestGenerator:
         return (len(self.manifest) + self.batch_size - 1) // self.batch_size
     
     def __iter__(self) -> Generator:
-        '''Iterate over batches with optional async prefetching.'''
+        '''Iterate over (batch, failed rows) with optional async prefetching.'''
         if self.num_workers > 0:
             return self._iter_with_prefetch()
         else:
@@ -112,9 +112,7 @@ class ManifestGenerator:
                 batch_indices.append(idx)
                 
                 if len(batch_indices) == self.batch_size or idx == len(self.manifest) - 1:
-                    batch = self._load_batch(batch_indices)
-                    if batch is not None:
-                        yield batch
+                    yield self._load_batch(batch_indices)
                     batch_indices = []
         except Exception as e:
             print(f"Error during iteration: {e}")
@@ -165,9 +163,7 @@ class ManifestGenerator:
                 batch_indices.append(idx)
                 
                 if len(batch_indices) == self.batch_size or idx == len(self.manifest) - 1:
-                    batch = self._load_batch(batch_indices)
-                    if batch is not None:
-                        self._batch_queue.put(batch)
+                    self._batch_queue.put(self._load_batch(batch_indices))
                     batch_indices = []
             
             self._batch_queue.put(None)  # Sentinel
@@ -175,12 +171,14 @@ class ManifestGenerator:
             print(f"Prefetch worker error: {e}")
             self._batch_queue.put(None)
     
-    def _load_batch(self, indices: list) -> Optional[Tuple]:
-        '''Load a batch of samples.'''
+    def _load_batch(self, indices: list) -> Tuple[Optional[Tuple], list]:
+        '''Load a batch of samples, and list the manifest rows that failed to load.'''
         batch_images = []
         batch_filepaths = []
         batch_frames = []
         batch_hw = []
+        batch_rows = []
+        failed = []
         
         for idx in indices:
             item = self._load_item(idx)
@@ -190,16 +188,19 @@ class ManifestGenerator:
                 batch_filepaths.append(filepath)
                 batch_frames.append(frame)
                 batch_hw.append(hw)
+                batch_rows.append(idx)
+            else:
+                failed.append(idx)
         
         if not batch_images:
-            return None
+            return None, failed
         
         # Stack into batch arrays
         batch_np = np.stack(batch_images, axis=0)  # (B, C, H, W)
         batch_frames_arr = np.array(batch_frames, dtype=np.int32)
         batch_hw_arr = np.stack(batch_hw, axis=0)
         
-        return batch_np, batch_filepaths, batch_frames_arr, batch_hw_arr
+        return (batch_np, batch_filepaths, batch_frames_arr, batch_hw_arr, np.array(batch_rows)), failed
     
     def _load_item(self, idx: int) -> Optional[Tuple]:
         '''Load a single item from dataset.'''
