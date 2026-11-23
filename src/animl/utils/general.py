@@ -79,13 +79,6 @@ def _cuda_index(user_set):
     return None
 
 
-def softmax(x):
-    '''
-    Helper function to softmax
-    '''
-    return np.exp(x)/np.sum(np.exp(x), axis=1, keepdims=True)
-
-
 def get_onnx_device(user_set=None, quiet=False):
     """
     Get gpu if available
@@ -324,6 +317,18 @@ def _scale_letterbox(bbox, resized_shape, original_shape):
     xywh_coords = _xyxy2xywh(xyxy_coords)
 
     return xywh_coords
+
+
+# ==============================================================================
+# MODEL OUTPUT
+# ==============================================================================
+
+def softmax(x):
+    '''
+    Helper function to softmax
+    '''
+    return np.exp(x)/np.sum(np.exp(x), axis=1, keepdims=True)
+
 
 def _nms(boxes, scores, iou_thres):
     x1, y1, x2, y2 = boxes.T
