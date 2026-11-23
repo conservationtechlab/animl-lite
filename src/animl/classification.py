@@ -177,9 +177,8 @@ def classify(model,
         failed_rows.extend(failed)
         if collated is None:  # entire batch was bad
             continue
-        output = model.run(None, {model.get_inputs()[0].name: collated[0]})
-        # softmax over each image's classes; output is a list of the model's outputs
-        raw_output.append(softmax(output[0]))
+        output = model.run(None, {model.get_inputs()[0].name: collated[0]})[0]
+        raw_output.extend(softmax(output))
 
     if len(raw_output) == 0:
         raise ValueError("None of the detections could be loaded; see failed rows above.")
