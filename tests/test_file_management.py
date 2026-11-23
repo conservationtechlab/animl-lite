@@ -329,3 +329,54 @@ def test_save_failed_rows_none_failed_removes_old_file(tmp_path: Path):
     file_management.save_failed_rows(manifest, [], out_file)
     assert not out_file.exists()
     assert file_management.load_failed_rows(out_file) == []
+
+
+def _write_videos(directory: Path, names):
+    import cv2
+    import numpy as np
+
+    for name in names:
+        writer = cv2.VideoWriter(str(directory / name), cv2.VideoWriter_fourcc(*"mp4v"), 5, (16, 16))
+        for _ in range(3):
+            writer.write(np.zeros((16, 16, 3), np.uint8))
+        writer.release()
+
+
+def test_build_file_manifest_videos_share_one_exiftool_process(tmp_path: Path):
+    from unittest.mock import patch
+
+    _write_videos(tmp_path, ["v1.mp4", "v2.mp4", "v3.mp4"])
+    with patch("animl.file_management.exiftool.ExifToolHelper") as helper:
+        helper.return_value.get_metadata.return_value = [{"QuickTime:CreateDate": "2024:01:02 03:04:05"}]
+        helper.return_value.running = True
+        result = file_management.build_file_manifest(str(tmp_path), exif=True)
+    helper.assert_called_once()
+    assert helper.return_value.get_metadata.call_count == 3
+    helper.return_value.terminate.assert_called_once()
+    assert (result["createdate"] == "2024-01-02 03:04:05").all()
+
+
+def test_build_file_manifest_missing_exiftool_warns_once(tmp_path: Path, capsys):
+    from unittest.mock import patch
+
+    _write_videos(tmp_path, ["v1.mp4", "v2.mp4"])
+    with patch("animl.file_management.exiftool.ExifToolHelper", side_effect=FileNotFoundError("exiftool")) as helper:
+        result = file_management.build_file_manifest(str(tmp_path), exif=True)
+    helper.assert_called_once()
+    assert capsys.readouterr().out.count("pyexiftool failed") == 1
+    assert len(result) == 2
+    assert result["datetime"].notna().all()
+
+
+def test_build_file_manifest_unreadable_video_keeps_exiftool_for_the_rest(tmp_path: Path):
+    from unittest.mock import patch
+
+    _write_videos(tmp_path, ["v1.mp4", "v2.mp4"])
+    with patch("animl.file_management.exiftool.ExifToolHelper") as helper:
+        helper.return_value.running = True
+        helper.return_value.get_metadata.side_effect = [Exception("bad file"),
+                                                        [{"QuickTime:CreateDate": "2024:01:02 03:04:05"}]]
+        result = file_management.build_file_manifest(str(tmp_path), exif=True)
+    helper.assert_called_once()
+    assert helper.return_value.get_metadata.call_count == 2
+    assert result.sort_values("filepath")["createdate"].notna().tolist() == [False, True]
