@@ -231,10 +231,11 @@ def test_manifest_generator_len_and_batches(tmp_path: Path):
     assert len(gen) == 1
     
     # Iterate and get first batch
-    batch = next(iter(gen))
+    batch, failed = next(iter(gen))
     assert batch is not None
+    assert failed == []
     
-    batch_images, batch_filepaths, batch_frames, batch_hw = batch
+    batch_images, batch_filepaths, batch_frames, batch_hw, batch_rows = batch
     assert batch_images.shape == (1, 3, 16, 16)  # (B, C, H, W)
     assert batch_filepaths == [str(img)]
     assert batch_frames[0] == 0
@@ -281,8 +282,50 @@ def test_manifest_dataloader_yields_batches(tmp_path: Path):
     df = pd.DataFrame({"filepath": [str(img)]})
     loader = ManifestGenerator(df, crop=False, resize_height=8, resize_width=8, batch_size=1)
     
-    batch = next(iter(loader))
-    batch_images, batch_filepaths, batch_frames, batch_hw = batch
+    batch, _ = next(iter(loader))
+    batch_images, batch_filepaths, batch_frames, batch_hw, _ = batch
     
     assert batch_images.shape == (1, 3, 8, 8)  # (B, C, H, W)
     assert batch_filepaths == [str(img)]
+
+
+@pytest.mark.parametrize("num_workers", [0, 2])
+def test_manifest_generator_reports_failed_rows(tmp_path: Path, num_workers):
+    """A manifest row that can't be loaded should be reported by its position."""
+    from PIL import Image
+
+    img = tmp_path / "img.jpg"
+    Image.new("RGB", (20, 10), color=(0, 0, 0)).save(img)
+    df = pd.DataFrame({"filepath": [str(img), str(tmp_path / "missing.jpg"), str(img)]})
+    gen = ManifestGenerator(df, crop=False, resize_height=8, resize_width=8, batch_size=3,
+                            num_workers=num_workers)
+
+    batch, failed = next(iter(gen))
+    assert failed == [1]
+    assert batch[-1].tolist() == [0, 2]
+
+
+def test_manifest_generator_yields_batch_where_all_failed(tmp_path: Path):
+    """A batch where nothing loads is still yielded, so its failed rows are reported."""
+    df = pd.DataFrame({"filepath": [str(tmp_path / "missing.jpg")]})
+    gen = ManifestGenerator(df, crop=False, resize_height=8, resize_width=8, batch_size=1, num_workers=0)
+
+    assert list(gen) == [(None, [0])]
+
+
+def test_save_and_load_failed_rows(tmp_path: Path):
+    manifest = pd.DataFrame({"filepath": ["a.mp4", "a.mp4", "b.jpg"], "frame": [0, 5, 0]})
+    out_file = tmp_path / "failed.txt"
+    file_management.save_failed_rows(manifest, [1, 2], out_file)
+    assert file_management.load_failed_rows(out_file) == [1, 2]
+    saved = pd.read_csv(out_file)
+    assert saved.iloc[0].to_dict() == {"row": 1, "filepath": "a.mp4", "frame": 5}
+
+
+def test_save_failed_rows_none_failed_removes_old_file(tmp_path: Path):
+    manifest = pd.DataFrame({"filepath": ["a.jpg"], "frame": [0]})
+    out_file = tmp_path / "failed.txt"
+    file_management.save_failed_rows(manifest, [0], out_file)
+    file_management.save_failed_rows(manifest, [], out_file)
+    assert not out_file.exists()
+    assert file_management.load_failed_rows(out_file) == []

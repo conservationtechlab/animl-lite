@@ -82,8 +82,10 @@ def extract_reid_embeddings(model,
                                        prefetch_size=prefetch_size,
                                        num_workers=num_workers,
                                        quiet=quiet)
-        for batch_images, _, _, _ in dataloader:
-            outputs = model.run(None, {model.get_inputs()[0].name: batch_images})
+        for collated, _ in dataloader:
+            if collated is None:  # entire batch was bad
+                continue
+            outputs = model.run(None, {model.get_inputs()[0].name: collated[0]})
             output.extend(outputs)
         output = np.vstack(output)
     return output

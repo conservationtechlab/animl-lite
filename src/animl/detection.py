@@ -171,12 +171,14 @@ def detect(detector,
                                    quiet=quiet)
 
     start_time = time.time()
-    for batch in dataloader:
+    failed_files = []
+    for batch, failed in dataloader:
         count += 1
+        # generator reports manifest rows; detect reports their files
+        failed_files.extend(dataloader.manifest.iloc[failed][file_col].tolist())
 
         # handle bad batches (eg. empty images, corrupted files)
         if batch is None:
-            print(f"Warning: batch {count} is None, skipping.")
             continue
 
         # ONNX Runtime inference
@@ -197,6 +199,8 @@ def detect(detector,
             print('Writing a new checkpoint after having processed {} images since last restart'.format(count))
             _save_detection_checkpoint(checkpoint_path, results)
 
+    if len(failed_files) > 0:
+        print(f"Warning: {len(failed_files)} files failed to load during detection and will be excluded from results.")
     if not quiet:
         print(f"\nFinished detection. Total images processed: {len(results)} at {round(len(results)/(time.time() - start_time), 1)} img/s.")
     if checkpoint_path:
