@@ -121,8 +121,13 @@ class TestFailedFiles:
     def test_single_classification_count_mismatch_raises(self):
         """predictions that don't match the detections used to be assigned to the wrong rows"""
         animals = pd.DataFrame({"filepath": ["a.jpg", "b.jpg", "c.jpg"], "conf": [1.0, 1.0, 1.0]})
-        with pytest.raises(ValueError, match="does not match"):
+        with pytest.raises(ValueError, match="Number of predictions does not match"):
             classification.single_classification(animals, None, np.array([[0.9, 0.1], [0.2, 0.8]]), ["cat", "dog"])
+
+    def test_single_classification_class_count_mismatch_raises(self):
+        animals = pd.DataFrame({"filepath": ["a.jpg"], "conf": [1.0]})
+        with pytest.raises(ValueError, match="Number of classes in predictions does not match"):
+            classification.single_classification(animals, None, np.array([[0.9, 0.1]]), ["cat", "dog", "bird"])
 
     def test_sequence_classification_leaves_out_failed_files(self):
         animals = pd.DataFrame({"filepath": ["a.jpg", "missing.jpg", "c.jpg"], "conf": [1.0, 1.0, 1.0],

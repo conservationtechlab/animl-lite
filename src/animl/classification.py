@@ -264,9 +264,8 @@ def _remove_failed(animals: pd.DataFrame, predictions_raw, failed_files, file_co
               " and will be excluded from results.")
         animals = animals[~animals[file_col].isin(failed_files)]
     animals = animals.reset_index(drop=True)
-    if len(predictions_raw) != len(animals):
-        raise ValueError(f"Number of predictions ({len(predictions_raw)}) does not match number of "
-                         f"animal detections ({len(animals)}) after removing failed files.")
+    if predictions_raw.shape[0] != len(animals):
+        raise ValueError("Number of predictions does not match number of animal detections.")
     return animals
 
 
@@ -309,6 +308,12 @@ def single_classification(animals: pd.DataFrame,
 
     # handle tuple output from classify (predictions, failed_files)
     predictions_raw, failed_files = _unpack_predictions(predictions_output, failed_files)
+
+    # check predictions are correct shape
+    if predictions_raw is None:
+        raise ValueError("Predictions output is None.")
+    if predictions_raw.shape[1] != len(class_list):
+        raise ValueError("Number of classes in predictions does not match length of class list.")
 
     if not animals.empty:
         animals = _remove_failed(animals, predictions_raw, failed_files, file_col)
@@ -420,6 +425,8 @@ def sequence_classification(animals: pd.DataFrame,
     # handle tuple output from classify (predictions, failed_files)
     predictions_raw, failed_files = _unpack_predictions(predictions_output, failed_files)
     animals = _remove_failed(animals, predictions_raw, failed_files, file_col)
+    if predictions_raw.shape[1] != len(class_list):
+        raise ValueError("Number of classes in predictions does not match length of class list.")
 
     if empty is not None or not empty.empty:
         empty["ID"] = range(0, empty.shape[0])
