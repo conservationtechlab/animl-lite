@@ -103,13 +103,17 @@ def classify(model,
         file_col (str): column name containing file paths
         crop (bool): use bbox to crop images before feeding into model
         normalize (bool): normalize the tensor before inference
-        out_file (str): path to save prediction results to
+        out_file (str): path to save prediction results to; the files that failed to load
+            are saved next to it, in classification_failed_files.txt
 
     Returns:
-        np.ndarray: softmaxed predictions, one row per detection (NaN where the image couldn't be loaded)
+        tuple of
+            np.ndarray: softmaxed predictions, one row per detection, in order, leaving out
+                every detection from the files in failed_files
+            list: files that failed to load, as in animl-py
     """
     if file_management.check_file(out_file, output_type="Classification results"):
-        return file_management.load_data(out_file).to_numpy()
+        return file_management.load_data(out_file).to_numpy(), _load_failed_files(out_file)
 
     # Manifest
     if isinstance(detections, pd.DataFrame):
@@ -170,29 +174,79 @@ def classify(model,
     start_time = time()
     # one row per detection, NaN where the image couldn't be loaded;
     # softmax over each image's classes
-    raw_output = generator.predict_by_row(model, dataset, transform=softmax)
+    by_row = generator.predict_by_row(model, dataset, transform=softmax)
+    raw_output, failed_files = _split_failed(by_row, dataset.manifest[file_col])
 
     if out_file:
         file_management.save_data(pd.DataFrame(raw_output), out_file)
+        _save_failed_files(out_file, failed_files)
 
-    processed = int((~np.isnan(raw_output).any(axis=1)).sum()) if raw_output.shape[1] else 0
-    if processed < len(raw_output):
-        print(f"Warning: {len(raw_output) - processed} images could not be loaded, their predictions are NaN.")
+    processed = len(raw_output)
     print(f"\nFinished classification. Total images processed: {processed} at {round(processed/(time() - start_time), 1)} img/s.")
 
-    return raw_output
+    return raw_output, failed_files
 
 
-def _drop_unclassified(animals: pd.DataFrame, predictions_raw):
-    '''Leave out detections whose image couldn't be loaded (NaN rows from classify)'''
-    predictions_raw = np.asarray(predictions_raw, dtype=float)
-    if predictions_raw.ndim != 2 or len(predictions_raw) != len(animals):
-        return animals, predictions_raw
-    loaded = ~np.isnan(predictions_raw).any(axis=1)
-    if not loaded.all():
-        print(f"Warning: {int((~loaded).sum())} detections could not be classified",
+FAILED_FILES_NAME = "classification_failed_files.txt"
+
+
+def _split_failed(by_row: np.ndarray, filepaths: pd.Series):
+    '''
+    Turn predict_by_row output into animl-py's (predictions, failed_files)
+
+    The consumers leave out every detection whose file is in failed_files, so the
+    predictions leave out all of those detections too, including ones that loaded
+    (e.g. other frames of a video with one unreadable frame). Otherwise the counts
+    wouldn't match.
+    '''
+    filepaths = filepaths.reset_index(drop=True)
+    if by_row.shape[1] == 0:  # nothing could be loaded
+        loaded = np.zeros(len(by_row), dtype=bool)
+    else:
+        loaded = ~np.isnan(by_row).any(axis=1)
+    failed_files = filepaths[~loaded].unique().tolist()
+    keep = ~filepaths.isin(failed_files).to_numpy()
+    if failed_files:
+        print(f"Warning: {int((~loaded).sum())} detections from {len(failed_files)} files could not be loaded.",
+              f"All {int((~keep).sum())} detections from those files are left out of the predictions.")
+    return by_row[keep], failed_files
+
+
+def _failed_files_path(out_file) -> Path:
+    return Path(out_file).parent / FAILED_FILES_NAME
+
+
+def _save_failed_files(out_file, failed_files: list) -> None:
+    path = _failed_files_path(out_file)
+    if failed_files:
+        path.write_text("".join(f"{f}\n" for f in failed_files))
+    elif path.is_file():
+        path.unlink()  # from an earlier run whose predictions were just overwritten
+
+
+def _load_failed_files(out_file) -> list:
+    path = _failed_files_path(out_file)
+    return path.read_text().splitlines() if path.is_file() else []
+
+
+def _unpack_predictions(predictions_output, failed_files):
+    '''(predictions, failed_files) from classify's tuple, or a bare predictions array'''
+    if isinstance(predictions_output, (list, tuple)) and len(predictions_output) == 2:
+        return predictions_output
+    return predictions_output, failed_files
+
+
+def _remove_failed(animals: pd.DataFrame, predictions_raw, failed_files, file_col: str) -> pd.DataFrame:
+    '''Leave out detections from files that failed to load, and check the predictions match'''
+    if failed_files is not None and len(failed_files) > 0:
+        print(f"Warning: {len(failed_files)} files failed to load during classification",
               " and will be excluded from results.")
-    return animals[loaded].reset_index(drop=True), predictions_raw[loaded]
+        animals = animals[~animals[file_col].isin(failed_files)]
+    animals = animals.reset_index(drop=True)
+    if len(predictions_raw) != len(animals):
+        raise ValueError(f"Number of predictions ({len(predictions_raw)}) does not match number of "
+                         f"animal detections ({len(animals)}) after removing failed files.")
+    return animals
 
 
 def single_classification(animals: pd.DataFrame,
@@ -233,18 +287,11 @@ def single_classification(animals: pd.DataFrame,
         class_list = class_list.to_list()
 
     # handle tuple output from classify (predictions, failed_files)
-    if isinstance(predictions_output, (list, tuple)) and len(predictions_output) == 2:
-        predictions_raw, failed_files = predictions_output
-    else:
-        predictions_raw, failed_files = predictions_output, failed_files
+    predictions_raw, failed_files = _unpack_predictions(predictions_output, failed_files)
 
     if not animals.empty:
-        if failed_files is not None and len(failed_files) > 0:
-            print(f"Warning: {len(failed_files)} files failed to load during classification",
-                  " and will be excluded from results.")
-            animals = animals[~animals[file_col].isin(failed_files)]
-        animals = animals.reset_index(drop=True)
-        animals, predictions_raw = _drop_unclassified(animals, predictions_raw)
+        animals = _remove_failed(animals, predictions_raw, failed_files, file_col)
+    if not animals.empty:
         animals["prediction"] = [class_list[i] for i in np.argmax(predictions_raw, axis=1)]
         animals["confidence"] = animals["conf"].mul(np.max(predictions_raw, axis=1))
 
@@ -285,13 +332,14 @@ def single_classification(animals: pd.DataFrame,
 
 def sequence_classification(animals: pd.DataFrame,
                             empty: Optional[pd.DataFrame],
-                            predictions_raw: np.array,
+                            predictions_output: Union[np.array, tuple],
                             class_list: pd.DataFrame,
                             station_col: str,
                             empty_class: str = "",
                             sort_columns: list[str] = None,
                             file_col: str = "filepath",
-                            maxdiff: int = 60):
+                            maxdiff: int = 60,
+                            failed_files: Optional[list] = None):
     """
     Applies class labels to images based on sequential information.
 
@@ -304,13 +352,15 @@ def sequence_classification(animals: pd.DataFrame,
     Args:
         animals (pd.DataFrame): Sub-selection of all images that contain animals
         empty (Optional) (pd.DataFrame): Sub-selection of all images that do not contain animals
-        predictions_raw (Numpy Array of Numpy Arrays): Logits of all entries in "animals"
+        predictions_output (Union[np.array, tuple]): softmaxed logits from classify()
+            and optionally list of failed files from classify
         class_list (pd.DataFrame): class list associated with classifier model
         station_col (str): The name of the station column
         empty_class (str) (Optional): the name of class_list 'empty' label
         sort_columns (List of Strings): Defines sorting order for the DataFrame
         file_col (str): The name of the filepath column
         maxdiff (int): Maximum time difference in seconds between any two images in a sequence
+        failed_files (Optional[list]): list of files that failed to load during classification
 
     Returns:
         final_df (pd.DataFrame): Sequence classified data from both animals and empty
@@ -346,7 +396,9 @@ def sequence_classification(animals: pd.DataFrame,
     else:
         empty_col = None
 
-    animals, predictions_raw = _drop_unclassified(animals.reset_index(drop=True), predictions_raw)
+    # handle tuple output from classify (predictions, failed_files)
+    predictions_raw, failed_files = _unpack_predictions(predictions_output, failed_files)
+    animals = _remove_failed(animals, predictions_raw, failed_files, file_col)
 
     if empty is not None or not empty.empty:
         empty["ID"] = range(0, empty.shape[0])

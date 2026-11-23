@@ -106,6 +106,7 @@ empty = animl.get_empty(detections)
    if desired.
 ```python
 classifier, class_list = animl.load_classifier('/path/to/model', '/path/to/classlist.txt', device='cuda:0')
+# returns (predictions, failed_files), as in animl-py
 raw_predictions = animl.classify(classifier, animals, resize_width=480, resize_height=480, 
                                  file_col="filepath", batch_size=4, out_file=working_dir.predictions)
 ```
