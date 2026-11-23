@@ -6,7 +6,7 @@ parse_detections() converts json output into a dataframe
 
 """
 from shutil import copyfile
-from typing import Optional
+from typing import Optional, Union
 import time
 import numpy as np
 import pandas as pd
@@ -59,7 +59,7 @@ def detect(detector,
            num_workers: int = 2,
            quiet: bool = True,
            checkpoint_path: Optional[str] = None,
-           checkpoint_frequency: int = -1,) -> list[dict]:
+           checkpoint_frequency: int = -1,) -> tuple[list[dict], list]:
     """
     Runs Detector model on a batches of image files.
 
@@ -83,7 +83,7 @@ def detect(detector,
         checkpoint_frequency (int): write results to checkpoint file every N images
 
     Returns:
-        list: list of dicts, each dict represents detections on one image
+        tuple of list of dicts, each dict represents detections on one image, and list of files that failed to load
     """
     # convert map keys to int if they are string (ie from reticulate)
     category_map = {int(k) if isinstance(k, str) and k.isdigit() else k: v for k, v in category_map.items()}
@@ -125,12 +125,14 @@ def detect(detector,
 
     # load checkpoint
     if checkpoint_path and file_management.check_file(checkpoint_path, output_type="Megadetector raw output"):
-        results = file_management.load_json(checkpoint_path).get('images')
+        checkpoint = file_management.load_json(checkpoint_path)
+        # checkpoints currently use 'images'; accept 'detections' for forward compatibility
+        results = checkpoint.get('detections', checkpoint.get('images', []))
         already_processed = set([r['filepath'] for r in results])
         manifest = manifest[~manifest[file_col].isin(already_processed)][[file_col, 'frame']].reset_index(drop=True)
         if manifest.empty:
             print("All images have already been processed. Exiting.")
-            return results
+            return results, []
     else:
         results = []
 
@@ -178,14 +180,12 @@ def detect(detector,
             print('Writing a new checkpoint after having processed {} images since last restart'.format(count))
             _save_detection_checkpoint(checkpoint_path, results)
 
-    if len(failed_files) > 0:
-        print(f"Warning: {len(failed_files)} files failed to load during detection and will be excluded from results.")
     if not quiet:
         print(f"\nFinished detection. Total images processed: {len(results)} at {round(len(results)/(time.time() - start_time), 1)} img/s.")
     if checkpoint_path:
         _save_detection_checkpoint(checkpoint_path, results)
 
-    return results
+    return results, failed_files
 
 
 def _convert_detections(predictions: list,
@@ -285,7 +285,7 @@ def _convert_detections(predictions: list,
     return results
 
 
-def parse_detections(detections: list[dict],
+def parse_detections(results: Union[list, tuple],
                      manifest: Optional[pd.DataFrame] = None,
                      out_file: Optional[str] = None,
                      threshold: float = 0,
@@ -296,7 +296,7 @@ def parse_detections(detections: list[dict],
     Converts listed output from detector to DataFrame.
 
     Args:
-        detections (list[dict]): md output dicts
+        results (Union[list, tuple]): md output dicts or tuple of (md output dicts, failed files)
         manifest (pd.DataFrame): full file manifest, if not None, merge md predictions automatically
         out_file (str): path to save dataframe
         threshold (float): parse only detections above given confidence threshold
@@ -313,11 +313,28 @@ def parse_detections(detections: list[dict],
         print("""Warning: 'frame' column not found in manifest columns. Defaulting to 0 for all rows.""")
         manifest['frame'] = 0
 
+    # unpack results
+    if isinstance(results, (tuple, list)) and len(results) == 2 and isinstance(results[0], list):
+        detections, failed_files = results
+    elif isinstance(results, dict):
+        # detection checkpoint files use the 'images' key
+        detections = results.get('detections', results.get('images', []))
+        failed_files = results.get('failed_files', [])
+    else:
+        detections, failed_files = results, []
+
+    if len(failed_files) > 0:
+        print(f"Warning: {len(failed_files)} files failed to load during detection and will be excluded from results.")
+        if out_file is not None:
+            with (Path(out_file).parent / "detection_failed_files.txt").open("w") as f:
+                for item in failed_files:
+                    f.write(f"{item}\n")
+
     # check results format
     if not isinstance(detections, list):
         raise TypeError("MD results input must be list")
     if len(detections) == 0:
-        raise AssertionError("'detections' contains no detections")
+        raise AssertionError("'results' contains no detections")
 
     # load results from file if they have already been parsed
     if file_management.check_file(out_file, output_type="Detections"):
