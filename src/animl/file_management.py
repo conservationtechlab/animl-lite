@@ -17,7 +17,7 @@ import exiftool
 import yaml
 from typing import Optional, Union
 
-IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', ".tiff", '.tif"'}
+IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.tiff', '.tif', '.ppm'}
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".wmv",
                     ".mpg", ".mpeg", ".asf", ".m4v"}
 VALID_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
@@ -185,9 +185,6 @@ def build_file_manifest(image_dir: str,
         else:
             files["datetime"] = files["filemodifydate"]
 
-        # convert to datetime
-        files["datetime"] = pd.to_datetime(files["datetime"])
-
     files = files.drop(index=invalid).reset_index(drop=True)
 
     if out_file:
@@ -251,11 +248,11 @@ def save_data(data: pd.DataFrame,
         prompt = "Output file exists, would you like to overwrite? y/n: "
         if input(prompt).lower() != "y":
             return
+
+    if Path(out_file).parent.exists():
+        data.to_csv(out_file, index=index)
     else:
-        if Path(out_file).parent.exists():
-            data.to_csv(out_file, index=index)
-        else:
-            raise AssertionError('Cannot save, directory does not exis.')
+        raise AssertionError('Cannot save, directory does not exist.')
 
 
 def load_data(file: Union[Path, str]) -> pd.DataFrame:

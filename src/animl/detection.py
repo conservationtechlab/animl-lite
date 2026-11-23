@@ -392,30 +392,6 @@ def parse_detections(results: Union[list, tuple],
     return df
 
 
-def _save_detection_checkpoint(checkpoint_path: str, results: dict) -> None:
-    """
-    Save a checkpoint of the detection results to a JSON file.
-
-    Args:
-        checkpoint_path (str): the path to the checkpoint file
-        results (list): a list of detection results to save
-    """
-    assert checkpoint_path is not None
-    # Back up any previous checkpoints, to protect against crashes while we're writing
-    # the checkpoint file.
-    checkpoint_tmp_path = None
-    if Path(checkpoint_path).is_file():
-        checkpoint_tmp_path = str(checkpoint_path) + '_tmp'
-        copyfile(checkpoint_path, checkpoint_tmp_path)
-
-    # Write the new checkpoint
-    file_management.save_json({'images': results}, checkpoint_path, prompt=False)
-
-    # Remove the backup checkpoint if it exists
-    if checkpoint_tmp_path is not None:
-        Path(checkpoint_tmp_path).unlink()
-
-
 def get_animals(manifest: pd.DataFrame):
     """
     Pulls MD animal detections for classification
@@ -462,3 +438,28 @@ def get_empty(manifest: pd.DataFrame):
         otherdf['confidence'] = otherdf['conf'].fillna(1)  # correct empty conf
 
     return otherdf
+
+
+def _save_detection_checkpoint(checkpoint_path: str, results: dict) -> None:
+    """
+    Save a checkpoint of the detection results to a JSON file.
+
+    Args:
+        checkpoint_path (str): the path to the checkpoint file
+        results (list): a list of detection results to save
+    """
+    assert checkpoint_path is not None
+    # Back up any previous checkpoints, to protect against crashes while we're writing
+    # the checkpoint file.
+    checkpoint_tmp_path = None
+    if Path(checkpoint_path).is_file():
+        checkpoint_tmp_path = str(checkpoint_path) + '_tmp'
+        copyfile(checkpoint_path, checkpoint_tmp_path)
+
+    # Write the new checkpoint
+    # TODO(next major): write under 'detections'; 'images' kept so older versions can resume
+    file_management.save_json({'images': results}, checkpoint_path, prompt=False)
+
+    # Remove the backup checkpoint if it exists
+    if checkpoint_tmp_path is not None:
+        Path(checkpoint_tmp_path).unlink()
