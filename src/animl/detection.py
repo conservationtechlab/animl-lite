@@ -12,12 +12,11 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
-import onnxruntime as ort
 
 from animl import file_management
 from animl.generator import ManifestGenerator
 from animl.utils.general import (_normalize_boxes, _xyxy2xywh, _scale_letterbox, get_onnx_device, 
-                                 _laplacian_variance, non_max_suppression)
+                                 _laplacian_variance, non_max_suppression, create_onnx_session)
 from animl.utils.visualization import MD_LABELS
 
 
@@ -41,7 +40,7 @@ def load_detector(model_path: str,
         raise FileNotFoundError(f"Model file not found at {model_path}")
 
     providers = get_onnx_device(user_set=device, quiet=quiet)
-    model = ort.InferenceSession(model_path, providers=providers)
+    model = create_onnx_session(model_path, providers)
     model.model_type = model_type.lower()
     return model
 

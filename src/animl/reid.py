@@ -9,9 +9,7 @@ from typing import Optional
 import pandas as pd
 import numpy as np
 
-import onnxruntime as ort
-
-from animl.utils.general import get_onnx_device
+from animl.utils.general import create_onnx_session, get_onnx_device
 from animl.generator import ManifestGenerator
 
 
@@ -40,7 +38,7 @@ def load_reid(model_path: str,
         raise FileNotFoundError(f"Model file not found at {model_path}")
 
     providers = get_onnx_device(user_set=device, quiet=quiet)
-    model = ort.InferenceSession(model_path, providers=providers)
+    model = create_onnx_session(model_path, providers)
     return model
 
 

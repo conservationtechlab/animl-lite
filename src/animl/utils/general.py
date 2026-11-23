@@ -6,6 +6,7 @@ import ctypes
 import functools
 import os
 import sys
+import warnings
 
 import cv2
 import numpy as np
@@ -106,7 +107,36 @@ def get_onnx_device(user_set=None, quiet=False):
                 print('Using CPU device.')
        
     return providers
- 
+
+
+def create_onnx_session(model_path, providers):
+    """
+    Create an ONNX Runtime session, warning if CUDA was requested but not used
+
+    cuda_usable() checks that the CUDA libraries load and a GPU is present, but
+    the CUDA provider can still fail when the session is created (driver too old
+    for the CUDA runtime, an unsupported GPU, a device index that doesn't exist,
+    no free GPU memory). ONNX Runtime then runs on CPU, only logging an error,
+    so models run many times slower with no sign of why in a GUI or notebook.
+
+    The warning is not affected by quiet: it reports a problem, not progress.
+
+    Args:
+        model_path (str | Path): path to the .onnx file
+        providers (list): execution providers, as returned by get_onnx_device
+
+    Returns:
+        onnxruntime.InferenceSession
+    """
+    session = ort.InferenceSession(str(model_path), providers=providers)
+    requested = [p[0] if isinstance(p, tuple) else p for p in providers]
+    if 'CUDAExecutionProvider' in requested and 'CUDAExecutionProvider' not in session.get_providers():
+        warnings.warn(f'CUDA was requested for {model_path} but could not be used, running on CPU. '
+                      'Check that the NVIDIA driver, CUDA and cuDNN versions match onnxruntime-gpu.',
+                      RuntimeWarning, stacklevel=3)
+    return session
+
+
 # ==============================================================================
 # FRAME SELECTION
 # ==============================================================================
