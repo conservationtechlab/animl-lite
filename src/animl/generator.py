@@ -81,6 +81,9 @@ class ManifestGenerator:
         
         if self.crop_coord not in ['relative', 'absolute']:
             raise ValueError("crop_coord must be 'relative' or 'absolute'")
+
+        if self.resize_width <= 0 or self.resize_height <= 0:
+            raise ValueError("resize_width and resize_height must be positive integers")
         
         if 'frame' not in self.manifest.columns:
             self.manifest['frame'] = 0
@@ -226,12 +229,6 @@ class ManifestGenerator:
                 return None
             
             width, height = img.size
-            
-            # Maintain aspect ratio if one dimension is zero
-            if self.resize_width > 0 and self.resize_height <= 0:
-                self.resize_height = int(width / height * self.resize_width)
-            elif self.resize_width <= 0 and self.resize_height > 0:
-                self.resize_width = int(height / width * self.resize_height)
             
             # Cropping if requested
             if self.crop:
