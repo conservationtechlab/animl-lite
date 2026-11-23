@@ -74,9 +74,29 @@ def test_get_version_matches_package_version():
     ],
 )
 def test_get_onnx_device_variants(monkeypatch, providers, user_set, quiet, expected):
-    monkeypatch.setattr(general, "cuda_usable", lambda: "CUDAExecutionProvider" in providers)
+    monkeypatch.setattr(general, "cuda_device_count", lambda: 2 if "CUDAExecutionProvider" in providers else 0)
     result = general.get_onnx_device(user_set=user_set, quiet=quiet)
     assert result == expected
+
+
+@pytest.mark.parametrize("user_set, device_id, warns", [
+    ("cuda:1", 1, False),
+    ("cuda:2", 0, True),   # only cuda:0 and cuda:1 exist
+    ("cuda:7", 0, True),   # indices above 3 used to be treated as unknown input
+])
+def test_get_onnx_device_selected_gpu_missing(monkeypatch, recwarn, user_set, device_id, warns):
+    monkeypatch.setattr(general, "cuda_device_count", lambda: 2)
+    result = general.get_onnx_device(user_set=user_set, quiet=True)
+    assert result == [("CUDAExecutionProvider", {"device_id": device_id}), "CPUExecutionProvider"]
+    assert any("only 2 CUDA device(s)" in str(w.message) for w in recwarn) is warns
+
+
+@pytest.mark.parametrize("user_set, expected", [
+    ("cuda", 0), ("CUDAExecutionProvider", 0), ("cuda:0", 0), ("cuda:12", 12),
+    ("cuda:", None), ("cuda:x", None), ("cpu", None), (None, None), ("weird", None),
+])
+def test_cuda_index(user_set, expected):
+    assert general._cuda_index(user_set) == expected
 
 
 def test_check_onnx_cuda_true(monkeypatch):
@@ -91,12 +111,12 @@ def test_check_onnx_cuda_false(monkeypatch):
 
 def test_cuda_usable_false_on_cpu_only_build(monkeypatch):
     # CPU-only onnxruntime (e.g. macOS) must short-circuit before touching any CUDA library
-    general.cuda_usable.cache_clear()
+    general.cuda_device_count.cache_clear()
     monkeypatch.setattr(general.ort, "get_available_providers", lambda: ["CPUExecutionProvider"])
     try:
         assert general.cuda_usable() is False
     finally:
-        general.cuda_usable.cache_clear()
+        general.cuda_device_count.cache_clear()
 
 
 def test_check_exiftool_success(monkeypatch):
