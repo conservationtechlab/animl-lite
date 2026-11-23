@@ -19,7 +19,40 @@ class _FakeClassifier:
 
     def run(self, _outputs, feeds):
         n = feeds["input"].shape[0]
-        return np.tile(np.array([[2.0, 1.0, 0.0]], dtype=np.float32), (n, 1))
+        # like onnxruntime, a list of the model's outputs
+        return [np.tile(np.array([[2.0, 1.0, 0.0]], dtype=np.float32), (n, 1))]
+
+
+LOGITS = np.array([[2.0, 0.0], [0.0, 3.0], [1.0, 1.0]], dtype=np.float32)
+
+
+class _FakeClassifierByImage:
+    """Image i (red = 20 * i) gets LOGITS[i], so each row can be traced to its image."""
+
+    def get_inputs(self):
+        return [type("Input", (), {"name": "input"})()]
+
+    def run(self, _outputs, feeds):
+        rows = np.rint(feeds["input"][:, 0].mean(axis=(1, 2)) * 255 / 20).astype(int)
+        return [LOGITS[rows]]
+
+
+def _images(tmp_path: Path, n: int) -> pd.DataFrame:
+    paths = []
+    for i in range(n):
+        path = tmp_path / f"img_{i}.png"
+        Image.new("RGB", (16, 16), color=(20 * i, 0, 0)).save(path)
+        paths.append(str(path))
+    return pd.DataFrame({"filepath": paths, "frame": 0})
+
+
+@pytest.mark.parametrize("batch_size", [1, 2, 3])
+def test_classify_softmax_over_classes_not_over_the_batch(tmp_path: Path, batch_size):
+    """Probabilities were normalised across the images of a batch, and were all 1 for a batch of one"""
+    expected = np.exp(LOGITS) / np.exp(LOGITS).sum(axis=1, keepdims=True)
+    predictions, _ = classify(_FakeClassifierByImage(), _images(tmp_path, 3), 8, 8, crop=False, normalize=True,
+                              batch_size=batch_size, num_workers=0)
+    np.testing.assert_allclose(predictions, expected, rtol=1e-5)
 
 
 @pytest.fixture

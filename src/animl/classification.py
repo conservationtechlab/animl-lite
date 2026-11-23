@@ -177,7 +177,7 @@ def classify(model,
         failed_rows.extend(failed)
         if collated is None:  # entire batch was bad
             continue
-        output = model.run(None, {model.get_inputs()[0].name: collated[0]})
+        output = model.run(None, {model.get_inputs()[0].name: collated[0]})[0]
         raw_output.extend(softmax(output))
 
     if len(raw_output) == 0:
