@@ -64,12 +64,13 @@ def extract_reid_embeddings(model,
         quiet (bool): if True, suppress the progress bar
 
     Returns:
-        output (np.ndarray): array of extracted embeddings
+        output (np.ndarray): one embedding per manifest row, NaN for rows that failed to load
     """
     if not {file_col}.issubset(manifest.columns):
         raise ValueError(f"DataFrame must contain '{file_col}' column.")
 
-    output = []
+    output = None
+    failed_rows = []
     if isinstance(manifest, pd.DataFrame):
 
         dataloader = ManifestGenerator(manifest,
@@ -82,12 +83,37 @@ def extract_reid_embeddings(model,
                                        prefetch_size=prefetch_size,
                                        num_workers=num_workers,
                                        quiet=quiet)
-        for collated, _ in dataloader:
+        for collated, failed in dataloader:
+            failed_rows.extend(failed)
             if collated is None:  # entire batch was bad
                 continue
-            outputs = model.run(None, {model.get_inputs()[0].name: collated[0]})
-            output.extend(outputs)
-        output = np.vstack(output)
+            emb = model.run(None, {model.get_inputs()[0].name: collated[0]})[0]
+            output = _place_by_row(output, emb, collated[-1], len(dataloader.manifest))
+
+        if output is None:
+            raise ValueError("None of the images could be loaded; see failed rows above.")
+        if len(failed_rows) > 0:
+            print(f"Warning: {len(failed_rows)} images could not be loaded, their embeddings are NaN.")
+    return output
+
+
+def _place_by_row(output: Optional[np.ndarray], emb: np.ndarray, rows: np.ndarray, n_rows: int) -> np.ndarray:
+    """
+    Place a batch of embeddings at their manifest rows.
+
+    Args:
+        output (Optional[np.ndarray]): embeddings so far, None before the first batch
+        emb (np.ndarray): embeddings of the batch
+        rows (np.ndarray): manifest rows of the batch
+        n_rows (int): number of rows in the manifest
+
+    Returns:
+        output with emb at rows, NaN for rows not yet filled
+    """
+    emb = np.asarray(emb).reshape(len(rows), -1)
+    if output is None:
+        output = np.full((n_rows, emb.shape[1]), np.nan, dtype=np.float32)
+    output[rows] = emb
     return output
 
 
