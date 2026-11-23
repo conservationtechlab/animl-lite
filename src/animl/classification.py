@@ -276,8 +276,16 @@ def single_classification(animals: pd.DataFrame,
 
     predictions_raw, failed_rows = _unpack_predictions(predictions_output, failed_rows)
 
+    # check predictions are correct shape
+    assert predictions_raw is not None, "Predictions output is None."
+    assert predictions_raw.shape[1] == len(class_list), "Number of classes in predictions does not match length of class list."
+
     if not animals.empty:
         animals = _drop_failed_rows(animals, failed_rows)
+
+        # ensure the number of predictions matches the number of animal detections after failed rows are removed
+        assert predictions_raw.shape[0] == len(animals), "Number of predictions does not match number of animal detections."
+
         animals["prediction"] = [class_list[i] for i in np.argmax(predictions_raw, axis=1)]
         animals["confidence"] = animals["conf"].mul(np.max(predictions_raw, axis=1))
 
@@ -380,6 +388,10 @@ def sequence_classification(animals: pd.DataFrame,
     predictions_raw, failed_rows = _unpack_predictions(predictions_output, failed_rows)
     # remove the rows that failed to load from animals dataframe
     animals = _drop_failed_rows(animals, failed_rows)
+
+    # check predictions are correct shape
+    assert predictions_raw.shape[0] == len(animals), "Number of predictions does not match number of animal detections."
+    assert predictions_raw.shape[1] == len(class_list), "Number of classes in predictions does not match length of class list."
 
     if empty_class > "":
         empty_col = class_list[class_list == empty_class].index[0]
