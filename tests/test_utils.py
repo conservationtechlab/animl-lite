@@ -74,9 +74,29 @@ def test_get_version_matches_package_version():
     ],
 )
 def test_get_onnx_device_variants(monkeypatch, providers, user_set, quiet, expected):
-    monkeypatch.setattr(general, "cuda_usable", lambda: "CUDAExecutionProvider" in providers)
+    monkeypatch.setattr(general, "cuda_device_count", lambda: 2 if "CUDAExecutionProvider" in providers else 0)
     result = general.get_onnx_device(user_set=user_set, quiet=quiet)
     assert result == expected
+
+
+@pytest.mark.parametrize("user_set, device_id, warns", [
+    ("cuda:1", 1, False),
+    ("cuda:2", 0, True),   # only cuda:0 and cuda:1 exist
+    ("cuda:7", 0, True),   # indices above 3 used to be treated as unknown input
+])
+def test_get_onnx_device_selected_gpu_missing(monkeypatch, recwarn, user_set, device_id, warns):
+    monkeypatch.setattr(general, "cuda_device_count", lambda: 2)
+    result = general.get_onnx_device(user_set=user_set, quiet=True)
+    assert result == [("CUDAExecutionProvider", {"device_id": device_id}), "CPUExecutionProvider"]
+    assert any("only 2 CUDA device(s)" in str(w.message) for w in recwarn) is warns
+
+
+@pytest.mark.parametrize("user_set, expected", [
+    ("cuda", 0), ("CUDAExecutionProvider", 0), ("cuda:0", 0), ("cuda:12", 12),
+    ("cuda:", None), ("cuda:x", None), ("cpu", None), (None, None), ("weird", None),
+])
+def test_cuda_index(user_set, expected):
+    assert general._cuda_index(user_set) == expected
 
 
 def test_check_onnx_cuda_true(monkeypatch):
@@ -91,12 +111,12 @@ def test_check_onnx_cuda_false(monkeypatch):
 
 def test_cuda_usable_false_on_cpu_only_build(monkeypatch):
     # CPU-only onnxruntime (e.g. macOS) must short-circuit before touching any CUDA library
-    general.cuda_usable.cache_clear()
+    general.cuda_device_count.cache_clear()
     monkeypatch.setattr(general.ort, "get_available_providers", lambda: ["CPUExecutionProvider"])
     try:
         assert general.cuda_usable() is False
     finally:
-        general.cuda_usable.cache_clear()
+        general.cuda_device_count.cache_clear()
 
 
 def test_check_exiftool_success(monkeypatch):
@@ -200,3 +220,28 @@ def test_scale_letterbox_returns_valid_normalized_bbox(bbox, resized, original):
     assert out.shape == (4,)
     assert np.all(out >= 0)
     assert np.all(out <= 1)
+
+
+class _Session:
+    def __init__(self, active):
+        self.active = active
+
+    def get_providers(self):
+        return self.active
+
+
+@pytest.mark.parametrize(
+    "requested, active, warns",
+    [
+        # cuda requested but the session fell back to cpu (e.g. driver too old)
+        (["CUDAExecutionProvider", "CPUExecutionProvider"], ["CPUExecutionProvider"], True),
+        ([("CUDAExecutionProvider", {"device_id": 1}), "CPUExecutionProvider"], ["CPUExecutionProvider"], True),
+        (["CUDAExecutionProvider", "CPUExecutionProvider"], ["CUDAExecutionProvider", "CPUExecutionProvider"], False),
+        (["CPUExecutionProvider"], ["CPUExecutionProvider"], False),
+    ],
+)
+def test_create_onnx_session_warns_on_cuda_fallback(monkeypatch, recwarn, requested, active, warns):
+    monkeypatch.setattr(general.ort, "InferenceSession", lambda _path, providers: _Session(active))
+    session = general.create_onnx_session("model.onnx", requested)
+    assert session.get_providers() == active
+    assert any("CUDA was requested" in str(w.message) for w in recwarn) is warns

@@ -9,10 +9,11 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from time import time
-import onnxruntime
 
 from animl import generator, file_management
-from animl.utils.general import get_onnx_device, softmax
+from animl.utils.general import create_onnx_session, get_onnx_device, softmax
+
+FAILED_FILES_NAME = "classification_failed_files.txt"
 
 
 def load_classifier(model_path: str,
@@ -40,7 +41,7 @@ def load_classifier(model_path: str,
     providers = get_onnx_device(user_set=device, quiet=quiet)
 
     
-    model = onnxruntime.InferenceSession(model_path, providers=providers)
+    model = create_onnx_session(model_path, providers)
     model.model_type = "classifier"
 
     # get number of classes
@@ -63,7 +64,8 @@ def load_classifier(model_path: str,
     return model, class_list
 
 
-def load_class_list(classlist_file):
+
+def load_class_list(classlist_file: str):
     """
     Return classlist file as pd.DataFrame.
 
@@ -92,7 +94,6 @@ def classify(model,
              out_file: Optional[str] = None,
              quiet: bool = True):
     """
-    TODO: align with R version
     Predict species using classifier model.
 
     Args:
@@ -106,13 +107,17 @@ def classify(model,
         out_file (str): path to save prediction results to
 
     Returns:
-        detections (pd.DataFrame): MD detections with classifier prediction and confidence
+        predictions (np.array): array of softmaxed logits for each class for each image that loaded
+        failed_rows (list): positions of the detections that failed to load
     """
+    # load from file if out_file provided and exists, with the rows that failed to load then
     if file_management.check_file(out_file, output_type="Classification results"):
-        return file_management.load_data(out_file).to_numpy()
+        failed_rows = file_management.load_failed_rows(Path(out_file).parent / FAILED_FILES_NAME)
+        return file_management.load_data(out_file).to_numpy(), failed_rows
 
     # initialize lists
     raw_output = []
+    failed_rows = []
 
     # Manifest
     if isinstance(detections, pd.DataFrame):
@@ -168,18 +173,68 @@ def classify(model,
 
     # Predict
     start_time = time()
-    for batch_images, _, _, _ in dataset:
-        output = model.run(None, {model.get_inputs()[0].name: batch_images})
+    for collated, failed in dataset:
+        failed_rows.extend(failed)
+        if collated is None:  # entire batch was bad
+            continue
+        output = model.run(None, {model.get_inputs()[0].name: collated[0]})[0]
         raw_output.extend(softmax(output))
 
+    if len(raw_output) == 0:
+        raise ValueError("None of the detections could be loaded; see failed rows above.")
     raw_output = np.vstack(raw_output)
 
     if out_file:
         file_management.save_data(pd.DataFrame(raw_output), out_file)
+        file_management.save_failed_rows(dataset.manifest, failed_rows,
+                                         Path(out_file).parent / FAILED_FILES_NAME, file_col=file_col)
 
-    print(f"\nFinished classification. Total images processed: {len(raw_output)} at {round(len(raw_output)/(time() - start_time), 1)} img/s.")
+    print(f"\nFinished classification. Total images processed: {len(raw_output)}",
+          f" at {round(len(raw_output)/(time() - start_time), 1)} img/s.")
 
-    return raw_output
+    return raw_output, failed_rows
+
+
+def _unpack_predictions(predictions_output, failed_rows):
+    """
+    Unpack classify output into predictions and failed rows.
+
+    Args:
+        predictions_output (Union[np.array, tuple, dict]): classify output, reticulate dict or predictions only
+        failed_rows (Optional[list]): failed rows to use when predictions_output is predictions only
+
+    Returns:
+        tuple of predictions and failed rows
+    """
+    if isinstance(predictions_output, (list, tuple)) and len(predictions_output) == 2:
+        predictions_raw, failed_rows = predictions_output
+    elif isinstance(predictions_output, dict):
+        predictions_raw = predictions_output.get('predictions', np.array([[]]))
+        failed_rows = predictions_output.get('failed_rows', [])
+    else:
+        predictions_raw = predictions_output
+    return predictions_raw, failed_rows
+
+
+def _drop_failed_rows(animals: pd.DataFrame, failed_rows: Optional[list]) -> pd.DataFrame:
+    """
+    Remove the detections that failed to load from animals.
+
+    Args:
+        animals (pd.DataFrame): animal detections passed to classify, in the same order
+        failed_rows (Optional[list]): positions of the detections that failed to load
+
+    Returns:
+        animals dataframe without the failed rows
+    """
+    animals = animals.reset_index(drop=True)
+    if failed_rows is not None and len(failed_rows) > 0:
+        # reticulate can pass the rows back as floats
+        failed_rows = [int(r) for r in failed_rows]
+        print(f"Warning: {len(failed_rows)} detections failed to load during classification",
+              "and will be excluded from results.")
+        animals = animals.drop(index=failed_rows).reset_index(drop=True)
+    return animals
 
 
 def single_classification(animals: pd.DataFrame,
@@ -189,7 +244,7 @@ def single_classification(animals: pd.DataFrame,
                           best: bool = False,
                           count: bool = False,
                           file_col: str = "filepath",
-                          failed_files: Optional[list] = None):
+                          failed_rows: Optional[list] = None):
     """
     Get maximum likelihood prediction from softmaxed logits.
 
@@ -197,12 +252,13 @@ def single_classification(animals: pd.DataFrame,
         animals (pd.DataFrame): animal detections from manifest
         empty (Optional[pd.DataFrame]): empty detections from manifest
         predictions_output (Union[np.array, tuple]): softmaxed logits from classify()
-            and optionally list of failed files from classify
+            and optionally the rows that failed to load, i.e. classify's output
         class_list (Union[list, pd.Series]): class list associated with model
         best (bool): whether to return one prediction per file
         count (bool): whether to add a count column with number of detections of each species per file
         file_col (str): column name for file paths in the dataframe
-        failed_files (Optional[list]): list of files that failed to load during classification
+        failed_rows (Optional[list]): positions in animals of the rows that failed to load
+            during classification, when predictions_output is only the predictions
 
     Returns:
         animals dataframe with "prediction" label an "confidence" columns
@@ -219,19 +275,19 @@ def single_classification(animals: pd.DataFrame,
     if isinstance(class_list, pd.Series):
         class_list = class_list.to_list()
 
-    # handle tuple output from classify (predictions, failed_files)
-    if isinstance(predictions_output, (list, tuple)) and len(predictions_output) == 2:
-        predictions_raw, failed_files = predictions_output
-    else:
-        predictions_raw, failed_files = predictions_output, failed_files
+    predictions_raw, failed_rows = _unpack_predictions(predictions_output, failed_rows)
+
+    # check predictions are correct shape
+    assert predictions_raw is not None, "Predictions output is None."
+    assert predictions_raw.shape[1] == len(class_list), "Number of classes in predictions does not match length of class list."
 
     if not animals.empty:
-        if failed_files is not None and len(failed_files) > 0:
-            print(f"Warning: {len(failed_files)} files failed to load during classification",
-                  " and will be excluded from results.")
-            animals = animals[~animals[file_col].isin(failed_files)]
-        animals = animals.reset_index(drop=True)
-        animals["prediction"] = [class_list[i] for i in np.argmax(predictions_raw, axis=1)]
+        animals = _drop_failed_rows(animals, failed_rows)
+
+        # ensure the number of predictions matches the number of animal detections after failed rows are removed
+        assert predictions_raw.shape[0] == len(animals), "Number of predictions does not match number of animal detections."
+
+        animals["prediction"] = [class_list[i] for i in np.argmax(predictions_raw, axis=1).astype(int)]
         animals["confidence"] = animals["conf"].mul(np.max(predictions_raw, axis=1))
 
     manifest = pd.concat([animals if not animals.empty else None, empty if not empty.empty else None]).reset_index(drop=True)
@@ -271,13 +327,16 @@ def single_classification(animals: pd.DataFrame,
 
 def sequence_classification(animals: pd.DataFrame,
                             empty: Optional[pd.DataFrame],
-                            predictions_raw: np.array,
+                            predictions_output: Union[np.array, tuple],
                             class_list: pd.DataFrame,
                             station_col: str,
                             empty_class: str = "",
                             sort_columns: list[str] = None,
                             file_col: str = "filepath",
+                            timestamp_col: str = "datetime",
+                            failed_rows: Optional[list] = None,
                             maxdiff: int = 60):
+    # TODO: align with R version
     """
     Applies class labels to images based on sequential information.
 
@@ -290,12 +349,15 @@ def sequence_classification(animals: pd.DataFrame,
     Args:
         animals (pd.DataFrame): Sub-selection of all images that contain animals
         empty (Optional) (pd.DataFrame): Sub-selection of all images that do not contain animals
-        predictions_raw (Numpy Array of Numpy Arrays): Logits of all entries in "animals"
+        predictions_output (Union[np.array, tuple]): Logits of all entries in "animals"
         class_list (pd.DataFrame): class list associated with classifier model
         station_col (str): The name of the station column
         empty_class (str) (Optional): the name of class_list 'empty' label
         sort_columns (List of Strings): Defines sorting order for the DataFrame
         file_col (str): The name of the filepath column
+        timestamp_col (str): The name of the timestamp column
+        failed_rows (Optional[list]): positions in animals of the rows that failed to load
+            during classification, when predictions_output is only the predictions
         maxdiff (int): Maximum time difference in seconds between any two images in a sequence
 
     Returns:
@@ -311,7 +373,7 @@ def sequence_classification(animals: pd.DataFrame,
         raise Exception("'station_col' must be a non-empty string")
 
     # Sanity check to verify that empty is a Pandas DataFrame, if defined
-    if empty is not None and not isinstance(animals, pd.DataFrame):
+    if empty is not None and not isinstance(empty, pd.DataFrame):
         raise Exception("'empty' must be a DataFrame")
 
     # Sanity check to verify that maxdiff is a positive number
@@ -321,8 +383,8 @@ def sequence_classification(animals: pd.DataFrame,
     if not {file_col}.issubset(animals.columns):
         raise ValueError(f"DataFrame must contain '{file_col}' column.")
 
-    if not {"datetime"}.issubset(animals.columns):
-        raise ValueError("DataFrame must contain 'datetime' column.")
+    if not {timestamp_col}.issubset(animals.columns):
+        raise ValueError(f"DataFrame must contain '{timestamp_col}' column.")
 
     if "conf" not in animals.columns:
         animals["conf"] = 1
@@ -332,7 +394,26 @@ def sequence_classification(animals: pd.DataFrame,
     else:
         empty_col = None
 
-    if empty is not None or not empty.empty:
+    # unpack predictions and failed rows
+    predictions_raw, failed_rows = _unpack_predictions(predictions_output, failed_rows)
+
+    # remove the rows that failed to load from animals dataframe
+    animals = _drop_failed_rows(animals, failed_rows)
+
+    # check prections are correct shape
+    assert predictions_raw.shape[0] == len(animals), "Number of predictions does not match number of animal detections."
+    assert predictions_raw.shape[1] == len(class_list), "Number of classes in predictions does not match length of class list."
+
+    # prepare empty dataframe for concat
+    if empty is not None and not empty.empty:
+        if not {'category_label', 'conf'}.issubset(empty.columns):
+            raise ValueError("Empty DataFrame must contain 'category_label' and 'conf' columns.")
+        # set confidence to 1 for empties if conf column is missing or all NaN
+        empty = empty.reset_index(drop=True)
+        empty['prediction'] = empty['category_label']
+        empty['confidence'] = empty['conf']
+        empty['confidence'] = empty['confidence'].replace(np.nan, 1)
+
         empty["ID"] = range(0, empty.shape[0])
         predempty = empty.pivot(index="ID", columns="prediction", values="confidence")
         # Replace NaN with 0
@@ -345,26 +426,32 @@ def sequence_classification(animals: pd.DataFrame,
                 predempty = predempty.drop("empty", axis=1)
             class_list = pd.concat([class_list,
                                     pd.Series([x for x in empty["prediction"].unique() if x != "empty"])], ignore_index=True)
-
         else:
             class_list = pd.concat([class_list, pd.Series(empty["prediction"].unique())], ignore_index=True)
             empty_col = predempty.columns.get_loc("empty")
 
         # placeholders
-        animals["prediction"] = list(class_list[np.argmax(predictions_raw, axis=1)])
+        animals["prediction"] = list(class_list[np.argmax(predictions_raw, axis=1).astype(int)])
         animals["confidence"] = animals["conf"].mul(np.max(predictions_raw, axis=1))
 
         empty["conf"] = 1
         animals_merged = pd.concat([animals, empty.iloc[:, :-1]]).reset_index(drop=True)  # dont add ID column
-        predictions = np.hstack((predictions_raw,
-                                 np.zeros((predictions_raw.shape[0], len(predempty.columns) - predictions_raw.shape[1]))))
+        predictions = np.hstack((predictions_raw, np.zeros((predictions_raw.shape[0],
+                                                            len(predempty.columns) - predictions_raw.shape[1]))))
         # concat
         predictions = np.vstack((predictions, np.array(predempty)))
 
-    if sort_columns is None:
-        sort_columns = [station_col, "datetime"]
+    # if no empty class, just use animal predictions
+    else:
+        animals["prediction"] = list(class_list[np.argmax(predictions_raw, axis=1)])
+        animals["confidence"] = animals["conf"].mul(np.max(predictions_raw, axis=1))
+        animals_merged = animals
+        predictions = predictions_raw
 
-    animals_merged['datetime'] = pd.to_datetime(animals_merged['datetime'], format="%Y-%m-%d %H:%M:%S")
+    if sort_columns is None:
+        sort_columns = [station_col, timestamp_col]
+
+    animals_merged[timestamp_col] = pd.to_datetime(animals_merged[timestamp_col], format="%Y-%m-%d %H:%M:%S")
 
     sort = animals_merged.sort_values(by=sort_columns).index
     animals_sort = animals_merged.loc[sort].reset_index(drop=True)
@@ -380,10 +467,10 @@ def sequence_classification(animals: pd.DataFrame,
         rows = [i]
         last_index = i+1
 
-        while (last_index < len(animals_sort) and not pd.isna(animals_sort.loc[i, "datetime"]) and
-               not pd.isna(animals_sort.loc[last_index, "datetime"]) and
+        while (last_index < len(animals_sort) and not pd.isna(animals_sort.loc[i, timestamp_col]) and
+               not pd.isna(animals_sort.loc[last_index, timestamp_col]) and
                animals_sort.loc[last_index, station_col] == animals_sort.loc[i, station_col] and
-               (animals_sort.loc[last_index, "datetime"] - animals_sort.loc[i, "datetime"]).total_seconds() <= maxdiff):
+               (animals_sort.loc[last_index, timestamp_col] - animals_sort.loc[i, timestamp_col]).total_seconds() <= maxdiff):
             rows.append(last_index)
             last_index += 1
 

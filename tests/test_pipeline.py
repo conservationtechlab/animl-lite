@@ -238,7 +238,7 @@ def test_from_config_uses_custom_detector_category_map(monkeypatch, tmp_path: Pa
 
     def _detect(_detector, _frames, **kwargs):
         detect_args.update(kwargs)
-        return [{"filepath": frames.iloc[0]["filepath"], "detections": []}]
+        return [{"filepath": frames.iloc[0]["filepath"], "detections": []}], []
 
     monkeypatch.setattr(pipeline.detection, "detect", _detect)
     monkeypatch.setattr(pipeline.detection, "parse_detections", lambda *_a, **_k: detections)

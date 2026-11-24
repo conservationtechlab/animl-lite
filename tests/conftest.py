@@ -29,6 +29,9 @@ def _install_optional_stubs() -> None:
             def get_modelmeta(self):
                 return types.SimpleNamespace(custom_metadata_map={})
 
+            def get_providers(self):
+                return ["CPUExecutionProvider"]
+
         ort.InferenceSession = _FakeSession
         ort.get_available_providers = lambda: ["CPUExecutionProvider"]
         sys.modules["onnxruntime"] = ort

@@ -64,8 +64,6 @@ class ManifestGenerator:
         
         # Memory pools for reuse
         self._img_pool = deque(maxlen=self.prefetch_size * 2)
-        self._batch_queue = queue.Queue(maxsize=self.prefetch_size)
-        self._stop_event = threading.Event()
         self._prefetch_thread = None
 
 
@@ -81,6 +79,9 @@ class ManifestGenerator:
         
         if self.crop_coord not in ['relative', 'absolute']:
             raise ValueError("crop_coord must be 'relative' or 'absolute'")
+
+        if self.resize_width <= 0 or self.resize_height <= 0:
+            raise ValueError("resize_width and resize_height must be positive integers")
         
         if 'frame' not in self.manifest.columns:
             self.manifest['frame'] = 0
@@ -90,7 +91,7 @@ class ManifestGenerator:
         return (len(self.manifest) + self.batch_size - 1) // self.batch_size
     
     def __iter__(self) -> Generator:
-        '''Iterate over batches with optional async prefetching.'''
+        '''Iterate over (batch, failed rows) with optional async prefetching.'''
         if self.num_workers > 0:
             return self._iter_with_prefetch()
         else:
@@ -112,9 +113,7 @@ class ManifestGenerator:
                 batch_indices.append(idx)
                 
                 if len(batch_indices) == self.batch_size or idx == len(self.manifest) - 1:
-                    batch = self._load_batch(batch_indices)
-                    if batch is not None:
-                        yield batch
+                    yield self._load_batch(batch_indices)
                     batch_indices = []
         except Exception as e:
             print(f"Error during iteration: {e}")
@@ -122,9 +121,13 @@ class ManifestGenerator:
     
     def _iter_with_prefetch(self) -> Generator:
         '''Multi-threaded iteration with async prefetching.'''
-        self._stop_event.clear()
+        # each iteration has its own queue and stop event, so a worker left over from an
+        # earlier, interrupted iteration can't put batches into this one
+        batch_queue = queue.Queue(maxsize=self.prefetch_size)
+        stop_event = threading.Event()
         self._prefetch_thread = threading.Thread(
             target=self._prefetch_worker,
+            args=(batch_queue, stop_event),
             daemon=True
         )
         self._prefetch_thread.start()
@@ -140,47 +143,50 @@ class ManifestGenerator:
                     pass
             
             for _ in iterator:
-                try:
-                    batch = self._batch_queue.get(timeout=30)
-                    if batch is None:  # Sentinel for end
-                        break
-                    yield batch
-                    batch_count += 1
-                except queue.Empty:
-                    print("Prefetch timeout - worker may be stuck")
+                # no timeout: a slow batch must not end the iteration, and the worker
+                # always puts a batch, the end sentinel or its error
+                batch = batch_queue.get()
+                if batch is None:  # Sentinel for end
                     break
+                if isinstance(batch, Exception):  # error in the worker
+                    raise batch
+                yield batch
+                batch_count += 1
         finally:
-            self._stop_event.set()
+            stop_event.set()
+            # empty the queue, so a worker waiting to put a batch can see stop_event and finish
+            while not batch_queue.empty():
+                batch_queue.get_nowait()
             if self._prefetch_thread:
                 self._prefetch_thread.join(timeout=5)
     
-    def _prefetch_worker(self) -> None:
+    def _prefetch_worker(self, batch_queue: queue.Queue, stop_event: threading.Event) -> None:
         '''Worker thread that prefetches batches.'''
         try:
             batch_indices = []
             for idx in range(len(self.manifest)):
-                if self._stop_event.is_set():
-                    break
+                if stop_event.is_set():
+                    return
                 
                 batch_indices.append(idx)
                 
                 if len(batch_indices) == self.batch_size or idx == len(self.manifest) - 1:
-                    batch = self._load_batch(batch_indices)
-                    if batch is not None:
-                        self._batch_queue.put(batch)
+                    batch_queue.put(self._load_batch(batch_indices))
                     batch_indices = []
             
-            self._batch_queue.put(None)  # Sentinel
+            batch_queue.put(None)  # Sentinel
         except Exception as e:
-            print(f"Prefetch worker error: {e}")
-            self._batch_queue.put(None)
+            # hand the error to the consumer instead of ending the iteration as if it had finished
+            batch_queue.put(e)
     
-    def _load_batch(self, indices: list) -> Optional[Tuple]:
-        '''Load a batch of samples.'''
+    def _load_batch(self, indices: list) -> Tuple[Optional[Tuple], list]:
+        '''Load a batch of samples, and list the manifest rows that failed to load.'''
         batch_images = []
         batch_filepaths = []
         batch_frames = []
         batch_hw = []
+        batch_rows = []
+        failed = []
         
         for idx in indices:
             item = self._load_item(idx)
@@ -190,16 +196,19 @@ class ManifestGenerator:
                 batch_filepaths.append(filepath)
                 batch_frames.append(frame)
                 batch_hw.append(hw)
+                batch_rows.append(idx)
+            else:
+                failed.append(idx)
         
         if not batch_images:
-            return None
+            return None, failed
         
         # Stack into batch arrays
         batch_np = np.stack(batch_images, axis=0)  # (B, C, H, W)
         batch_frames_arr = np.array(batch_frames, dtype=np.int32)
         batch_hw_arr = np.stack(batch_hw, axis=0)
         
-        return batch_np, batch_filepaths, batch_frames_arr, batch_hw_arr
+        return (batch_np, batch_filepaths, batch_frames_arr, batch_hw_arr, np.array(batch_rows)), failed
     
     def _load_item(self, idx: int) -> Optional[Tuple]:
         '''Load a single item from dataset.'''
@@ -225,12 +234,6 @@ class ManifestGenerator:
                 return None
             
             width, height = img.size
-            
-            # Maintain aspect ratio if one dimension is zero
-            if self.resize_width > 0 and self.resize_height <= 0:
-                self.resize_height = int(width / height * self.resize_width)
-            elif self.resize_width <= 0 and self.resize_height > 0:
-                self.resize_width = int(height / width * self.resize_height)
             
             # Cropping if requested
             if self.crop:

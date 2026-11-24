@@ -9,9 +9,7 @@ from typing import Optional
 import pandas as pd
 import numpy as np
 
-import onnxruntime as ort
-
-from animl.utils.general import get_onnx_device
+from animl.utils.general import create_onnx_session, get_onnx_device
 from animl.generator import ManifestGenerator
 
 
@@ -40,7 +38,7 @@ def load_reid(model_path: str,
         raise FileNotFoundError(f"Model file not found at {model_path}")
 
     providers = get_onnx_device(user_set=device, quiet=quiet)
-    model = ort.InferenceSession(model_path, providers=providers)
+    model = create_onnx_session(model_path, providers)
     return model
 
 
@@ -66,12 +64,14 @@ def extract_reid_embeddings(model,
         quiet (bool): if True, suppress the progress bar
 
     Returns:
-        output (np.ndarray): array of extracted embeddings
+        output (np.ndarray): one embedding per manifest row, NaN for rows that failed to load
     """
     if not {file_col}.issubset(manifest.columns):
         raise ValueError(f"DataFrame must contain '{file_col}' column.")
 
     output = []
+    rows = []  # manifest row of each embedding
+    failed_rows = []
     if isinstance(manifest, pd.DataFrame):
 
         dataloader = ManifestGenerator(manifest,
@@ -84,10 +84,22 @@ def extract_reid_embeddings(model,
                                        prefetch_size=prefetch_size,
                                        num_workers=num_workers,
                                        quiet=quiet)
-        for batch_images, _, _, _ in dataloader:
-            outputs = model.run(None, {model.get_inputs()[0].name: batch_images})
+        for collated, failed in dataloader:
+            failed_rows.extend(failed)
+            if collated is None:  # entire batch was bad
+                continue
+            outputs = model.run(None, {model.get_inputs()[0].name: collated[0]})
             output.extend(outputs)
-        output = np.vstack(output)
+            rows.extend(collated[-1].tolist())
+
+        if len(output) == 0:
+            raise ValueError("None of the images could be loaded; see failed rows above.")
+        if len(failed_rows) > 0:
+            print(f"Warning: {len(failed_rows)} images could not be loaded, their embeddings are NaN.")
+        # one embedding per manifest row, NaN for rows that failed to load
+        emb = np.vstack(output)
+        output = np.full((len(manifest), emb.shape[1]), np.nan, dtype=np.float32)
+        output[rows] = emb
     return output
 
 

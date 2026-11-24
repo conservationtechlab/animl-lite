@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import multiprocessing as mp
 import subprocess
+import time
 from pathlib import Path
 
 import cv2
@@ -49,9 +51,14 @@ class TestCountFramesInvalidInput:
             def get(self, prop):
                 return 0
 
+            def release(self):
+                released.append(True)
+
+        released = []
         monkeypatch.setattr(video_processing.cv2, "VideoCapture", _EmptyCapture)
         assert video_processing._count_frames(path) is None
         assert "has 0 frames" in capsys.readouterr().out
+        assert released == [True]
 
     def test_quiet_suppresses_messages(self, tmp_path, capsys):
         broken = tmp_path / "broken.mp4"
@@ -81,6 +88,20 @@ class TestCountFramesSelection:
         path = _video(tmp_path / "clip.mp4", 20)
         out = video_processing._count_frames(path, frames=2)
         assert all(fp == path for fp, _ in out)
+
+
+class TestCountFramesNoRepeats:
+    def test_no_repeated_frames_when_asking_for_more_than_the_video_has(self, tmp_path):
+        """increment was 0, so frame 0 was returned for every requested frame"""
+        assert _selected(_video(tmp_path / "clip.mp4", 3), frames=5) == [0, 1, 2]
+
+    def test_no_repeated_frames_when_sampling_faster_than_the_video(self, tmp_path):
+        frames = _selected(_video(tmp_path / "clip.mp4", 10, fps=10), fps=25)
+        assert frames == sorted(set(frames))
+        assert max(frames) <= 9
+
+    def test_frames_spacing_unchanged(self, tmp_path):
+        assert _selected(_video(tmp_path / "clip.mp4", 20), frames=5) == [0, 4, 8, 12, 16]
 
 
 class TestFpsFallback:
@@ -190,3 +211,39 @@ def test_get_frame_as_image_returns_rgb(tmp_path):
     path = _video(tmp_path / "clip.mp4", 5)
     image = video_processing.get_frame_as_image(path, frame=2)
     assert image.shape == (24, 32, 3)
+
+
+def _slow_count_frames(filepath, frames=5, fps=None, quiet=False):
+    time.sleep(0.5)
+    return [[str(filepath), 0]]
+
+
+def _frames(files, **kwargs):
+    kwargs = {"frames": 3, "num_workers": 2, "quiet": True, **kwargs}
+    return video_processing.extract_frames(pd.DataFrame({"filepath": files}), **kwargs)
+
+
+class TestExtractFramesParallel:
+    def test_same_frames_as_serial(self, tmp_path):
+        files = [_video(tmp_path / f"v{i}.mp4", 20 + 10 * i) for i in range(3)]
+        parallel = _frames(files, parallel=True)
+        serial = _frames(files, parallel=False)
+        pd.testing.assert_frame_equal(parallel, serial)
+        assert len(parallel) == 9
+
+    @pytest.mark.parametrize("parallel", [True, False])
+    def test_unreadable_videos(self, tmp_path, parallel):
+        """np.vstack([]) raised in parallel mode when no video could be read"""
+        broken = tmp_path / "broken.mp4"
+        broken.write_bytes(b"not a video")
+        assert _frames([str(broken)], parallel=parallel).empty
+
+    @pytest.mark.skipif(mp.get_start_method() != "fork", reason="the patched function reaches the workers only with fork")
+    def test_videos_run_concurrently(self, tmp_path, monkeypatch):
+        """pool.apply waits for each video, so 'parallel' ran one video at a time"""
+        monkeypatch.setattr(video_processing, "_count_frames", _slow_count_frames)
+        files = [str(tmp_path / f"v{i}.mp4") for i in range(4)]
+        start = time.time()
+        frames = _frames(files, parallel=True, num_workers=4)
+        assert time.time() - start < 1.5
+        assert frames["filepath"].tolist() == files

@@ -6,19 +6,19 @@ parse_detections() converts json output into a dataframe
 
 """
 from shutil import copyfile
-from typing import Optional
+from typing import Optional, Union
 import time
 import numpy as np
 import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
-import onnxruntime as ort
 
 from animl import file_management
 from animl.generator import ManifestGenerator
 from animl.utils.general import (_normalize_boxes, _xyxy2xywh, _scale_letterbox, get_onnx_device,
                                  _crop_clarity, _frame_score, _normalize_aspect_mode,
-                                 _coerce_weights, ScoreWeights, non_max_suppression)
+                                 _coerce_weights, ScoreWeights, non_max_suppression,
+                                 _laplacian_variance, create_onnx_session)
 from animl.utils.visualization import MD_LABELS
 
 
@@ -42,7 +42,7 @@ def load_detector(model_path: str,
         raise FileNotFoundError(f"Model file not found at {model_path}")
 
     providers = get_onnx_device(user_set=device, quiet=quiet)
-    model = ort.InferenceSession(model_path, providers=providers)
+    model = create_onnx_session(model_path, providers)
     model.model_type = model_type.lower()
     return model
 
@@ -63,7 +63,7 @@ def detect(detector,
            num_workers: int = 2,
            quiet: bool = True,
            checkpoint_path: Optional[str] = None,
-           checkpoint_frequency: int = -1,) -> list[dict]:
+           checkpoint_frequency: int = -1,) -> tuple[list[dict], list]:
     """
     Runs Detector model on a batches of image files.
 
@@ -93,35 +93,14 @@ def detect(detector,
         checkpoint_frequency (int): write results to checkpoint file every N images
 
     Returns:
-        list: list of dicts, each dict represents detections on one image
+        tuple of list of dicts, each dict represents detections on one image, and list of files that failed to load
     """
     # convert map keys to int if they are string (ie from reticulate)
     category_map = {int(k) if isinstance(k, str) and k.isdigit() else k: v for k, v in category_map.items()}
 
     # Single image filepath
     if isinstance(image_file_names, str):
-        # convert img path to tensor
-        manifest = pd.DataFrame([[image_file_names, 0]], columns=['filepath', 'frame'])
-        dataloader = ManifestGenerator(manifest,
-                                       resize_width=resize_width,
-                                       resize_height=resize_height,
-                                       crop=False,
-                                       normalize=True,
-                                       letterbox=letterbox,
-                                       batch_size=batch_size,
-                                       prefetch_size=prefetch_size,
-                                       num_workers=num_workers,
-                                       quiet=quiet)
-
-        input_name = detector.get_inputs()[0].name
-        outputs = detector.run(None, {input_name: dataloader[0]})[0]
-        results = _convert_detections(outputs,
-                                      dataloader,
-                                      letterbox,
-                                      confidence_threshold=confidence_threshold,
-                                      category_map=category_map,
-                                      model_type=detector.model_type)
-        return results
+        manifest = pd.DataFrame([[image_file_names, 0]], columns=[file_col, 'frame'])
 
     # list of image filepaths
     elif isinstance(image_file_names, list):
@@ -156,15 +135,16 @@ def detect(detector,
 
     # load checkpoint
     if checkpoint_path and file_management.check_file(checkpoint_path, output_type="Megadetector raw output"):
-        results = file_management.load_json(checkpoint_path).get('images')
+        checkpoint = file_management.load_json(checkpoint_path)
+        # checkpoints currently use 'images'; accept 'detections' for forward compatibility
+        results = checkpoint.get('detections', checkpoint.get('images', []))
         already_processed = set([r['filepath'] for r in results])
         manifest = manifest[~manifest[file_col].isin(already_processed)][[file_col, 'frame']].reset_index(drop=True)
         if manifest.empty:
             print("All images have already been processed. Exiting.")
-            return results
+            return results, []
     else:
         results = []
-        image_file_names = set(image_file_names)
 
     count = 0
 
@@ -172,6 +152,7 @@ def detect(detector,
     dataloader = ManifestGenerator(manifest,
                                    resize_width=resize_width,
                                    resize_height=resize_height,
+                                   file_col=file_col,
                                    crop=False,
                                    normalize=True,
                                    letterbox=letterbox,
@@ -181,12 +162,14 @@ def detect(detector,
                                    quiet=quiet)
 
     start_time = time.time()
-    for batch in dataloader:
+    failed_files = []
+    for batch, failed in dataloader:
         count += 1
+        # generator reports manifest rows; detect reports their files
+        failed_files.extend(dataloader.manifest.iloc[failed][file_col].tolist())
 
         # handle bad batches (eg. empty images, corrupted files)
         if batch is None:
-            print(f"Warning: batch {count} is None, skipping.")
             continue
 
         # ONNX Runtime inference
@@ -214,7 +197,7 @@ def detect(detector,
     if checkpoint_path:
         _save_detection_checkpoint(checkpoint_path, results)
 
-    return results
+    return results, failed_files
 
 
 def _convert_detections(predictions: list,
@@ -281,8 +264,6 @@ def _convert_detections(predictions: list,
 
                 bbox = _normalize_boxes(boxes[j], image_tensors[i].shape[1:])
                 bbox = _xyxy2xywh(bbox)
-                if bbox.all() == 0:
-                    continue
 
                 tensor_bbox = bbox.copy()  # box in the model-input image, used to crop for clarity
 
@@ -323,7 +304,7 @@ def _convert_detections(predictions: list,
     return results
 
 
-def parse_detections(detections: list[dict],
+def parse_detections(results: Union[list, tuple],
                      manifest: Optional[pd.DataFrame] = None,
                      out_file: Optional[str] = None,
                      threshold: float = 0,
@@ -334,7 +315,7 @@ def parse_detections(detections: list[dict],
     Converts listed output from detector to DataFrame.
 
     Args:
-        detections (list[dict]): md output dicts
+        results (Union[list, tuple]): md output dicts or tuple of (md output dicts, failed files)
         manifest (pd.DataFrame): full file manifest, if not None, merge md predictions automatically
         out_file (str): path to save dataframe
         threshold (float): parse only detections above given confidence threshold
@@ -351,11 +332,26 @@ def parse_detections(detections: list[dict],
         print("""Warning: 'frame' column not found in manifest columns. Defaulting to 0 for all rows.""")
         manifest['frame'] = 0
 
+    # unpack results
+    if isinstance(results, (tuple, list)) and len(results) == 2 and isinstance(results[0], list):
+        detections, failed_files = results
+    elif isinstance(results, dict):
+        # detection checkpoint files use the 'images' key
+        detections = results.get('detections', results.get('images', []))
+        failed_files = results.get('failed_files', [])
+    else:
+        detections, failed_files = results, []
+
+    if len(failed_files) > 0:
+        print(f"Warning: {len(failed_files)} files failed to load during detection and will be excluded from results.")
+        if out_file is not None:
+            with (Path(out_file).parent / "detection_failed_files.txt").open("w") as f:
+                for item in failed_files:
+                    f.write(f"{item}\n")
+
     # check results format
     if not isinstance(detections, list):
         raise TypeError("MD results input must be list")
-    if len(detections) == 0:
-        raise AssertionError("'detections' contains no detections")
 
     # load results from file if they have already been parsed
     if file_management.check_file(out_file, output_type="Detections"):
@@ -400,7 +396,10 @@ def parse_detections(detections: list[dict],
                         data['clarity'] = detection.get('clarity', None)
                     lst.append(data)
 
-    df = pd.DataFrame(lst)
+    # columns are set so an empty result (no images, e.g. all unreadable) can still be merged and filtered
+    columns = ['filepath', 'frame', 'max_detection_conf', 'category', 'category_label',
+               'conf', 'bbox_x', 'bbox_y', 'bbox_w', 'bbox_h'] + (['score', 'clarity'] if score else [])
+    df = pd.DataFrame(lst, columns=columns)
 
     if manifest is not None:
         if file_col in manifest.columns:
@@ -412,30 +411,6 @@ def parse_detections(detections: list[dict],
         file_management.save_data(df, out_file)
 
     return df
-
-
-def _save_detection_checkpoint(checkpoint_path: str, results: dict) -> None:
-    """
-    Save a checkpoint of the detection results to a JSON file.
-
-    Args:
-        checkpoint_path (str): the path to the checkpoint file
-        results (list): a list of detection results to save
-    """
-    assert checkpoint_path is not None
-    # Back up any previous checkpoints, to protect against crashes while we're writing
-    # the checkpoint file.
-    checkpoint_tmp_path = None
-    if Path(checkpoint_path).is_file():
-        checkpoint_tmp_path = str(checkpoint_path) + '_tmp'
-        copyfile(checkpoint_path, checkpoint_tmp_path)
-
-    # Write the new checkpoint
-    file_management.save_json({'images': results}, checkpoint_path, prompt=False)
-
-    # Remove the backup checkpoint if it exists
-    if checkpoint_tmp_path is not None:
-        Path(checkpoint_tmp_path).unlink()
 
 
 def get_animals(manifest: pd.DataFrame):
@@ -484,3 +459,28 @@ def get_empty(manifest: pd.DataFrame):
         otherdf['confidence'] = otherdf['conf'].fillna(1)  # correct empty conf
 
     return otherdf
+
+
+def _save_detection_checkpoint(checkpoint_path: str, results: dict) -> None:
+    """
+    Save a checkpoint of the detection results to a JSON file.
+
+    Args:
+        checkpoint_path (str): the path to the checkpoint file
+        results (list): a list of detection results to save
+    """
+    assert checkpoint_path is not None
+    # Back up any previous checkpoints, to protect against crashes while we're writing
+    # the checkpoint file.
+    checkpoint_tmp_path = None
+    if Path(checkpoint_path).is_file():
+        checkpoint_tmp_path = str(checkpoint_path) + '_tmp'
+        copyfile(checkpoint_path, checkpoint_tmp_path)
+
+    # Write the new checkpoint
+    # TODO(next major): write under 'detections'; 'images' kept so older versions can resume
+    file_management.save_json({'images': results}, checkpoint_path, prompt=False)
+
+    # Remove the backup checkpoint if it exists
+    if checkpoint_tmp_path is not None:
+        Path(checkpoint_tmp_path).unlink()
