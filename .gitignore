@@ -137,3 +137,6 @@ dmypy.json
 # Pyre type checker
 .pyre/
 .vscode/settings.json
+
+# animl-py exported by scripts/upstream_diff.py
+.upstream/
