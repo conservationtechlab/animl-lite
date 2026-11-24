@@ -129,6 +129,7 @@ def _laplacian_variance(image):
     
     return laplacian.var()
 
+ASPECT_MODES = ("wide", "tall") # aspect_mode=None means no aspect-ratio preference
 
 @dataclass(frozen=True)
 class ScoreWeights:
@@ -179,7 +180,20 @@ DEFAULT_SCORE_WEIGHTS = ScoreWeights()
 
 
 def _coerce_weights(weights):
-    """None -> defaults; ScoreWeights -> itself; dict -> validated ScoreWeights."""
+    """
+    Converts input weights to a validated ScoreWeights instance.
+    
+    Args:
+        weights (ScoreWeights, dict or None): Frame scoring weights. If None, the default weights are used.
+        If a dict, it must contain exactly the keys conf, area, aspect and clarity.
+        
+    Returns:
+        ScoreWeights: Validated scoring weights.
+
+    Raises:
+        TypeError: If weights is not a ScoreWeights instance, dict or None.
+        ValueError: If the dict contains missing or unknown keys, or the weights are invalid or do not sum to 1.    
+    """
     if weights is None:
         return DEFAULT_SCORE_WEIGHTS
     if isinstance(weights, ScoreWeights):
@@ -189,15 +203,34 @@ def _coerce_weights(weights):
     raise TypeError(f"weights must be a ScoreWeights, a dict or None, got {type(weights).__name__}")
 
 
-ASPECT_MODES = ("wide", "tall")  # aspect_mode=None means no aspect-ratio preference
-
-
 def _normalize_aspect_mode(mode):
-    """Return 'wide', 'tall' or None. None (and the string 'none', for backwards compatibility) means no preference."""
-    if mode is None or (isinstance(mode, str) and mode.lower() == "none"):
+    """
+    Validates and normalizes the preferred bounding-box aspect ratio mode.
+
+    Args:
+        mode (str or None): Preferred orientation of the bounding box.
+            'wide' rewards wider boxes, 'tall' rewards taller boxes, and
+            None indicates that aspect ratio should be ignored.
+            The string 'none' is also accepted for backwards compatibility.
+
+    Returns:
+        str or None: The normalized aspect mode ('wide', 'tall' or None).
+
+    Raises:
+        ValueError: If mode is not None, 'none', 'wide' or 'tall'.
+    """
+    if mode is None:
         return None
+
+    if isinstance(mode, str):
+        mode = mode.lower()
+
+    if mode == "none":
+        return None
+
     if mode not in ASPECT_MODES:
         raise ValueError(f"aspect_mode must be None or one of {ASPECT_MODES}, got '{mode}'")
+
     return mode
 
 
@@ -294,7 +327,7 @@ def _xywh2xyxy(bbox):
 # THIS ONE
 def _xyxy2xywh(bbox):
     """
-    Converts bounding boxes from xywh to xyxy format.
+    Converts bounding boxes from xyxy to xywh format.
 
     Args:
         bbox (list): Bounding box coordinates in the format [x_min, y_min, width, height].
