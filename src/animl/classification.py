@@ -37,6 +37,10 @@ def load_classifier(model_path: str,
     model_path = Path(model_path)
     if not quiet:
         print(f'Loading model at {model_path}')
+
+    if not model_path.exists():
+        raise FileNotFoundError(f"Model file not found at {model_path}")
+
     # check to make sure GPU is available if chosen
     providers = get_onnx_device(user_set=device, quiet=quiet)
 
