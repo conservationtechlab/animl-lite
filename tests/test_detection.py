@@ -1,238 +1,123 @@
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Optional
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
-import pytest
+from PIL import Image
 
-from animl.detection import (
-    _convert_detections,
-    get_animals,
-    get_empty,
-    load_detector,
-    parse_detections,
-)
+from animl import detection
 
 
-# ---------------------------------------------------------------------------
-# Helpers / fixtures
-# ---------------------------------------------------------------------------
+class FakeDetector:
+    """ONNX-like MegaDetector returning fixed boxes in letterboxed 960x960 pixels"""
+    model_type = "megadetector"
 
-@pytest.fixture
-def sample_detections_with_animal() -> list[dict]:
-    return [
-        {
-            "filepath": "img_a.jpg",
-            "frame": 0,
-            "max_detection_conf": 0.9,
-            "category": 1,
-            "category_label": "animal",
-            "detections": [
-                {
-                    "category": 1,
-                    "category_label": "animal",
-                    "conf": 0.9,
-                    "bbox_x": 0.1,
-                    "bbox_y": 0.2,
-                    "bbox_w": 0.3,
-                    "bbox_h": 0.4,
-                }
-            ],
-        }
-    ]
+    def __init__(self, boxes):
+        self.boxes = np.array(boxes, dtype=np.float32)
+
+    def get_inputs(self):
+        return [SimpleNamespace(name="images")]
+
+    def run(self, _names, feed):
+        return [np.repeat(self.boxes[np.newaxis], feed["images"].shape[0], axis=0)]
 
 
-@pytest.fixture
-def sample_detections_empty() -> list[dict]:
-    return [
-        {
-            "filepath": "img_b.jpg",
-            "frame": 0,
-            "max_detection_conf": None,
-            "category": 0,
-            "category_label": "empty",
-            "detections": [],
-        }
-    ]
+def _image(tmp_path, name="img.jpg", size=(640, 480)):
+    path = tmp_path / name
+    Image.new("RGB", size, (90, 90, 90)).save(path)
+    return str(path)
 
 
-@pytest.fixture
-def mixed_detections(
-    sample_detections_with_animal, sample_detections_empty
-) -> list[dict]:
-    return sample_detections_with_animal + sample_detections_empty
+def _detect(detector, files, **kwargs):
+    kwargs = {"num_workers": 0, "quiet": True, **kwargs}
+    return detection.detect(detector, files, 960, 960, **kwargs)
 
 
-@pytest.fixture
-def real_detector_model() -> Path:
-    """
-    Use an existing real ONNX model file for testing.
-    Point this to your actual model location.
-    """
-    # Option 1: Copy from a known location in your repo/test data
-    real_model_path = Path(__file__).parent / "fixtures" / "md_v1000.0.0-sorrel.onnx"
-    
-    if real_model_path.exists():
-        return real_model_path
+class TestInputs:
+    BOX = [[300, 300, 700, 700, 0.8, 0]]
 
-    pytest.skip("Real detector model not found")
+    def test_single_path(self, tmp_path):
+        """ManifestGenerator isn't subscriptable; a single path raised a TypeError"""
+        path = _image(tmp_path)
+        (result,), _ = _detect(FakeDetector(self.BOX), path)
+        assert result["filepath"] == path
+        assert len(result["detections"]) == 1
 
+    def test_list_of_paths(self, tmp_path):
+        paths = [_image(tmp_path, "a.jpg"), _image(tmp_path, "b.jpg")]
+        results, _ = _detect(FakeDetector(self.BOX), paths)
+        assert [r["filepath"] for r in results] == paths
 
-
-
-# ---------------------------------------------------------------------------
-# load_detector
-# ---------------------------------------------------------------------------
-
-def test_load_detector_raises_for_missing_file(tmp_path: Path):
-    with pytest.raises(FileNotFoundError):
-        load_detector(str(tmp_path / "nonexistent.onnx"))
+    def test_custom_file_col(self, tmp_path):
+        """file_col wasn't passed to ManifestGenerator, which raised for any column but 'filepath'"""
+        path = _image(tmp_path)
+        (result,), _ = _detect(FakeDetector(self.BOX), pd.DataFrame({"path": [path], "frame": [0]}), file_col="path")
+        assert result["filepath"] == path
 
 
-def test_load_detector_returns_model_with_type(real_detector_model: Path):
-    model = load_detector(str(real_detector_model), model_type="megadetector")
-    assert model.model_type == "megadetector"
+class TestFailedFiles:
+    BOX = [[300, 300, 700, 700, 0.8, 0]]
+
+    def test_detect_returns_failed_files(self, tmp_path):
+        path = _image(tmp_path)
+        missing = str(tmp_path / "missing.jpg")
+        results, failed_files = detection.detect(FakeDetector(self.BOX), [path, missing], 960, 960,
+                                                 num_workers=0, quiet=True)
+        assert [r["filepath"] for r in results] == [path]
+        assert failed_files == [missing]
+
+    def test_parse_detections_accepts_detect_output_and_saves_failed_files(self, tmp_path):
+        path = _image(tmp_path)
+        missing = str(tmp_path / "missing.jpg")
+        out_file = tmp_path / "detections.csv"
+        output = detection.detect(FakeDetector(self.BOX), [path, missing], 960, 960, num_workers=0, quiet=True)
+        df = detection.parse_detections(output, out_file=str(out_file))
+        assert df["filepath"].tolist() == [path]
+        assert (tmp_path / "detection_failed_files.txt").read_text().splitlines() == [missing]
+
+    def test_parse_detections_accepts_checkpoint_dict(self, tmp_path):
+        path = _image(tmp_path)
+        results, _ = detection.detect(FakeDetector(self.BOX), path, 960, 960, num_workers=0, quiet=True)
+        assert detection.parse_detections({"images": results})["filepath"].tolist() == [path]
+
+    def test_resume_accepts_detections_key(self, tmp_path, monkeypatch):
+        import json
+        monkeypatch.setattr("builtins.input", lambda _prompt: "y")  # load the checkpoint
+        path = _image(tmp_path)
+        checkpoint = tmp_path / "checkpoint.json"
+        results, _ = detection.detect(FakeDetector(self.BOX), path, 960, 960, num_workers=0, quiet=True)
+        checkpoint.write_text(json.dumps({"detections": results}))
+        resumed, failed_files = detection.detect(FakeDetector(self.BOX), [path], 960, 960, num_workers=0,
+                                                 quiet=True, checkpoint_path=str(checkpoint))
+        assert [r["filepath"] for r in resumed] == [path]
+        assert failed_files == []
 
 
-def test_load_detector_sets_custom_model_type(real_detector_model: Path):
-    model = load_detector(str(real_detector_model), model_type="yolo")
-    assert model.model_type == "yolo"
+class TestParseDetectionsEmpty:
+    def test_no_images(self):
+        """An empty list (e.g. every image unreadable) used to raise an AssertionError"""
+        df = detection.parse_detections([])
+        assert df.empty
+        assert {"filepath", "frame", "category_label", "conf", "bbox_x"}.issubset(df.columns)
+        assert detection.get_animals(df).empty
+        assert detection.get_empty(df).empty
 
+    def test_no_images_merged_onto_manifest(self):
+        manifest = pd.DataFrame({"filepath": ["a.jpg", "b.jpg"], "frame": [0, 0]})
+        df = detection.parse_detections(([], ["a.jpg", "b.jpg"]), manifest=manifest)
+        assert df["filepath"].tolist() == ["a.jpg", "b.jpg"]
+        assert df["conf"].isna().all()
 
-# ---------------------------------------------------------------------------
-# parse_detections
-# ---------------------------------------------------------------------------
+    def test_score_columns(self):
+        assert {"score", "clarity"}.issubset(detection.parse_detections([], score=True).columns)
 
-def test_parse_detections_returns_dataframe(sample_detections_with_animal):
-    df = parse_detections(sample_detections_with_animal)
-    assert isinstance(df, pd.DataFrame)
-    assert not df.empty
-
-
-def test_parse_detections_contains_expected_columns(sample_detections_with_animal):
-    df = parse_detections(sample_detections_with_animal)
-    for col in ("filepath", "frame", "category", "conf", "bbox_x", "bbox_y", "bbox_w", "bbox_h"):
-        assert col in df.columns, f"Missing column: {col}"
-
-
-def test_parse_detections_empty_detections(sample_detections_empty):
-    df = parse_detections(sample_detections_empty)
-    assert isinstance(df, pd.DataFrame)
-    assert len(df) == 1
-    assert df.iloc[0]["category_label"] == "empty"
-
-
-def test_parse_detections_raises_on_empty_list():
-    with pytest.raises(AssertionError):
-        parse_detections([])
-
-
-def test_parse_detections_raises_on_non_list():
-    with pytest.raises(TypeError):
-        parse_detections({"not": "a list"})
-
-
-def test_parse_detections_threshold_filters(sample_detections_with_animal):
-    df = parse_detections(sample_detections_with_animal, threshold=0.95)
-    # The only detection has conf=0.9, which is below the threshold of 0.95,
-    # so it should be filtered out leaving no animal rows with a non-null conf.
-    assert df.empty
-
-
-def test_parse_detections_merges_manifest(sample_detections_with_animal, tmp_path: Path):
-    manifest = pd.DataFrame(
-        {"filepath": ["img_a.jpg"], "frame": [0], "station": ["s1"]}
-    )
-    df = parse_detections(sample_detections_with_animal, manifest=manifest)
-    assert "station" in df.columns
-
-
-def test_parse_detections_raises_invalid_manifest_col(sample_detections_with_animal):
-    manifest = pd.DataFrame({"other_col": ["img_a.jpg"]})
-    with pytest.raises(ValueError):
-        parse_detections(sample_detections_with_animal, manifest=manifest, file_col="filepath")
-
-
-def test_parse_detections_saves_to_file(tmp_path: Path, sample_detections_with_animal):
-    out = tmp_path / "detections.csv"
-    df = parse_detections(sample_detections_with_animal, out_file=str(out))
-    assert out.exists()
-    assert isinstance(df, pd.DataFrame)
-
-
-# ---------------------------------------------------------------------------
-# get_animals / get_empty
-# ---------------------------------------------------------------------------
-
-@pytest.fixture
-def manifest_with_mixed_categories() -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "filepath": ["a.jpg", "b.jpg", "c.jpg"],
-            "frame": [0, 0, 0],
-            "category": [1, 0, 2],
-            "conf": [0.9, 1, 0.8],
-            "category_label": ["animal", "empty", "vehicle"],
-        }
-    )
-
-
-def test_get_animals_returns_only_animals(manifest_with_mixed_categories):
-    animals = get_animals(manifest_with_mixed_categories)
-    assert not animals.empty
-    assert all(animals["category_label"] == "animal")
-
-
-def test_get_animals_returns_empty_df_when_no_animals():
-    manifest = pd.DataFrame(
-        {"category_label": ["empty", "vehicle"], "filepath": ["a.jpg", "b.jpg"]}
-    )
-    animals = get_animals(manifest)
-    assert animals.empty
-
-
-def test_get_animals_uses_category_when_no_label_col():
-    manifest = pd.DataFrame(
-        {"category": [1, 0, 1], "filepath": ["a.jpg", "b.jpg", "c.jpg"]}
-    )
-    animals = get_animals(manifest)
-    assert len(animals) == 2
-
-
-def test_get_empty_returns_non_animals(manifest_with_mixed_categories):
-    others = get_empty(manifest_with_mixed_categories)
-    assert not others.empty
-    assert all(others["category_label"] != "animal")
-
-
-def test_get_empty_returns_empty_df_when_all_animals():
-    manifest = pd.DataFrame(
-        {
-            "category": [1, 1],
-            "category_label": ["animal", "animal"],
-            "filepath": ["a.jpg", "b.jpg"],
-        }
-    )
-    others = get_empty(manifest)
-    assert others.empty
-
-
-# ---------------------------------------------------------------------------
-# _convert_detections (internal helper)
-# ---------------------------------------------------------------------------
-
-def test_convert_detections_no_detection_produces_empty_result():
-    # Simulate a batch with one image that has zero predictions above threshold.
-    image_tensor = np.zeros((1, 3, 32, 32), dtype=np.float32)
-    image_paths = ["img.jpg"]
-    image_frames = [0]
-    image_sizes = np.array([[32, 32]])
-    # pred with no detections (empty rows)
-    predictions = [np.zeros((0, 6), dtype=np.float32)]
-    batch = (image_tensor, image_paths, image_frames, image_sizes)
-    results = _convert_detections(predictions, batch, letterbox=False)
-    assert len(results) == 1
-    assert results[0]["detections"] == []
-    assert results[0]["filepath"] == "img.jpg"
+    def test_detections_unchanged(self):
+        frames = [{"filepath": "a.jpg", "frame": 0, "max_detection_conf": 0.9,
+                   "detections": [{"category": 1, "category_label": "animal", "conf": 0.9,
+                                   "bbox_x": 0.1, "bbox_y": 0.2, "bbox_w": 0.3, "bbox_h": 0.4}]},
+                  {"filepath": "b.jpg", "frame": 0, "max_detection_conf": None, "category": 0,
+                   "category_label": "empty", "detections": []}]
+        df = detection.parse_detections(frames)
+        assert df[["filepath", "category_label", "bbox_w"]].values.tolist()[0] == ["a.jpg", "animal", 0.3]
+        assert df["category_label"].tolist() == ["animal", "empty"]

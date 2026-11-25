@@ -231,10 +231,11 @@ def test_manifest_generator_len_and_batches(tmp_path: Path):
     assert len(gen) == 1
     
     # Iterate and get first batch
-    batch = next(iter(gen))
+    batch, failed = next(iter(gen))
     assert batch is not None
+    assert failed == []
     
-    batch_images, batch_filepaths, batch_frames, batch_hw = batch
+    batch_images, batch_filepaths, batch_frames, batch_hw, batch_rows = batch
     assert batch_images.shape == (1, 3, 16, 16)  # (B, C, H, W)
     assert batch_filepaths == [str(img)]
     assert batch_frames[0] == 0
@@ -250,7 +251,7 @@ def test_manifest_generator_requires_bbox_when_crop_true(tmp_path: Path):
     df = pd.DataFrame({"filepath": [str(img)]})
     
     # Should not raise; instead it disables cropping and prints a message
-    gen = ManifestGenerator(df, crop=True)
+    gen = ManifestGenerator(df, resize_height=16, resize_width=16, crop=True)
     assert gen.crop is False
 
 
@@ -269,7 +270,7 @@ def test_manifest_generator_invalid_crop_coord(tmp_path: Path):
     })
     
     with pytest.raises(ValueError, match="crop_coord must be 'relative' or 'absolute'"):
-        ManifestGenerator(df, crop=True, crop_coord="bad")
+        ManifestGenerator(df, resize_height=16, resize_width=16, crop=True, crop_coord="bad")
 
 
 def test_manifest_dataloader_yields_batches(tmp_path: Path):
@@ -281,8 +282,107 @@ def test_manifest_dataloader_yields_batches(tmp_path: Path):
     df = pd.DataFrame({"filepath": [str(img)]})
     loader = ManifestGenerator(df, crop=False, resize_height=8, resize_width=8, batch_size=1)
     
-    batch = next(iter(loader))
-    batch_images, batch_filepaths, batch_frames, batch_hw = batch
+    batch, _ = next(iter(loader))
+    batch_images, batch_filepaths, batch_frames, batch_hw, _ = batch
     
     assert batch_images.shape == (1, 3, 8, 8)  # (B, C, H, W)
     assert batch_filepaths == [str(img)]
+
+
+@pytest.mark.parametrize("num_workers", [0, 2])
+def test_manifest_generator_reports_failed_rows(tmp_path: Path, num_workers):
+    """A manifest row that can't be loaded should be reported by its position."""
+    from PIL import Image
+
+    img = tmp_path / "img.jpg"
+    Image.new("RGB", (20, 10), color=(0, 0, 0)).save(img)
+    df = pd.DataFrame({"filepath": [str(img), str(tmp_path / "missing.jpg"), str(img)]})
+    gen = ManifestGenerator(df, crop=False, resize_height=8, resize_width=8, batch_size=3,
+                            num_workers=num_workers)
+
+    batch, failed = next(iter(gen))
+    assert failed == [1]
+    assert batch[-1].tolist() == [0, 2]
+
+
+def test_manifest_generator_yields_batch_where_all_failed(tmp_path: Path):
+    """A batch where nothing loads is still yielded, so its failed rows are reported."""
+    df = pd.DataFrame({"filepath": [str(tmp_path / "missing.jpg")]})
+    gen = ManifestGenerator(df, crop=False, resize_height=8, resize_width=8, batch_size=1, num_workers=0)
+
+    assert list(gen) == [(None, [0])]
+
+
+def test_save_and_load_failed_rows(tmp_path: Path):
+    manifest = pd.DataFrame({"filepath": ["a.mp4", "a.mp4", "b.jpg"], "frame": [0, 5, 0]})
+    out_file = tmp_path / "failed.txt"
+    file_management.save_failed_rows(manifest, [1, 2], out_file)
+    assert file_management.load_failed_rows(out_file) == [1, 2]
+    saved = pd.read_csv(out_file)
+    assert saved.iloc[0].to_dict() == {"row": 1, "filepath": "a.mp4", "frame": 5}
+
+
+def test_save_failed_rows_none_failed_removes_old_file(tmp_path: Path):
+    manifest = pd.DataFrame({"filepath": ["a.jpg"], "frame": [0]})
+    out_file = tmp_path / "failed.txt"
+    file_management.save_failed_rows(manifest, [0], out_file)
+    file_management.save_failed_rows(manifest, [], out_file)
+    assert not out_file.exists()
+    assert file_management.load_failed_rows(out_file) == []
+
+
+def _write_videos(directory: Path, names):
+    import cv2
+    import numpy as np
+
+    for name in names:
+        writer = cv2.VideoWriter(str(directory / name), cv2.VideoWriter_fourcc(*"mp4v"), 5, (16, 16))
+        for _ in range(3):
+            writer.write(np.zeros((16, 16, 3), np.uint8))
+        writer.release()
+
+
+def test_build_file_manifest_videos_share_one_exiftool_process(tmp_path: Path):
+    from unittest.mock import patch
+
+    _write_videos(tmp_path, ["v1.mp4", "v2.mp4", "v3.mp4"])
+    with patch("animl.file_management.exiftool.ExifToolHelper") as helper:
+        helper.return_value.get_metadata.return_value = [{"QuickTime:CreateDate": "2024:01:02 03:04:05"}]
+        helper.return_value.running = True
+        result = file_management.build_file_manifest(str(tmp_path), exif=True)
+    helper.assert_called_once()
+    assert helper.return_value.get_metadata.call_count == 3
+    helper.return_value.terminate.assert_called_once()
+    assert (result["createdate"] == "2024-01-02 03:04:05").all()
+
+
+def test_build_file_manifest_missing_exiftool_warns_once(tmp_path: Path, capsys):
+    from unittest.mock import patch
+
+    _write_videos(tmp_path, ["v1.mp4", "v2.mp4"])
+    with patch("animl.file_management.exiftool.ExifToolHelper", side_effect=FileNotFoundError("exiftool")) as helper:
+        result = file_management.build_file_manifest(str(tmp_path), exif=True)
+    helper.assert_called_once()
+    assert capsys.readouterr().out.count("pyexiftool failed") == 1
+    assert len(result) == 2
+    assert result["datetime"].notna().all()
+
+
+def test_build_file_manifest_unreadable_video_keeps_exiftool_for_the_rest(tmp_path: Path):
+    from unittest.mock import patch
+
+    _write_videos(tmp_path, ["v1.mp4", "v2.mp4"])
+
+    def get_metadata(filepath):
+        # by name, as files are read in directory order, which differs between systems
+        if Path(filepath).name == "v1.mp4":
+            raise Exception("bad file")
+        return [{"QuickTime:CreateDate": "2024:01:02 03:04:05"}]
+
+    with patch("animl.file_management.exiftool.ExifToolHelper") as helper:
+        helper.return_value.running = True
+        helper.return_value.get_metadata.side_effect = get_metadata
+        result = file_management.build_file_manifest(str(tmp_path), exif=True)
+    helper.assert_called_once()
+    assert helper.return_value.get_metadata.call_count == 2
+    assert result.sort_values("filepath")["createdate"].notna().tolist() == [False, True]

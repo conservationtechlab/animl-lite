@@ -1,6 +1,6 @@
 [project]
 name = "animl-lite"  
-version = "3.3.4"
+dynamic = ["version"]
 description = "Tools for classifying camera trap images"  
 
 readme = "README.md" 
@@ -16,13 +16,10 @@ dependencies = [
     "pillow>=12.3.0",
     "pyexiftool>=0.5.6",
     "pyyaml>=6.0.3",
-    "opencv-python>=4.12.0.88", 
-    "onnxruntime==1.22.0",
+    "onnxruntime-gpu==1.22.0; sys_platform != 'darwin'",
+    "onnxruntime==1.22.0; sys_platform == 'darwin'",
+    "opencv-python>=4.12.0.88",
     "tqdm>=4.66.5",
-]
-[project.optional-dependencies]
-gpu = [
-    "onnxruntime-gpu==1.22.0", 
 ]
 
 [project.urls]  # Optional
@@ -34,3 +31,11 @@ gpu = [
 # https://pip.pypa.io/en/stable/reference/pip/#pep-517-and-518-support
 requires = ["setuptools>=42"]
 build-backend = "setuptools.build_meta"
+
+
+[tool.setuptools.dynamic]
+version = {attr = "animl.__version__"}
+
+[tool.pytest.ini_options]
+# test this checkout, not an installed animl-lite
+pythonpath = ["src"]

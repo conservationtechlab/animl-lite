@@ -22,7 +22,6 @@ def check_exiftool():
 
 
 def check_onnx_cuda():
-    """Checks if CUDA is available for ONNX Runtime."""
-    import onnxruntime as ort
-    providers = ort.get_available_providers()
-    return 'CUDAExecutionProvider' in providers
+    """Checks if ONNX Runtime can actually run on a CUDA GPU (see cuda_usable)."""
+    from animl.utils.general import cuda_usable
+    return cuda_usable()

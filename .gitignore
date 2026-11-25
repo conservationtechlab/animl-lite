@@ -34,6 +34,7 @@ models/
 *.csv
 *.ipynb
 examples/
+tests/fixtures/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -137,3 +138,6 @@ dmypy.json
 # Pyre type checker
 .pyre/
 .vscode/settings.json
+
+# animl-py exported by scripts/upstream_diff.py
+.upstream/

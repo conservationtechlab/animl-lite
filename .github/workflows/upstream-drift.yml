@@ -1,0 +1,33 @@
+name: Upstream drift
+
+# Reports functions changed in animl-py since animl-lite last synced with them.
+# Weekly and on demand only, so changes in animl-py don't block animl-lite PRs.
+on:
+  schedule:
+    - cron: "0 15 * * 1"  # Mondays
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out animl-lite
+        uses: actions/checkout@v4
+
+      - name: Check out animl-py dev
+        uses: actions/checkout@v4
+        with:
+          repository: conservationtechlab/animl-py
+          ref: dev
+          path: animl-py
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compare with animl-py
+        run: python scripts/upstream_drift.py --upstream animl-py

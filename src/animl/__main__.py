@@ -16,11 +16,11 @@ Paths to model files must be edited to local machine.
 
 @ Kyra Swanson, 2023
 '''
-from animl import pipeline
 import time
 import argparse
 from pathlib import Path
 
+from animl import pipeline
 
 # Start timer
 start_time = time.time()

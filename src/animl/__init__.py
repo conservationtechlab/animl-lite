@@ -1,4 +1,4 @@
-__version__ = '3.3.4'
+__version__ = '3.4.0'
 
 from animl import classification
 from animl import detection
@@ -23,41 +23,47 @@ from animl.file_management import (IMAGE_EXTENSIONS, VALID_EXTENSIONS,
                                    VIDEO_EXTENSIONS, WorkingDirectory,
                                    active_times, build_file_manifest,
                                    check_file, class_list_to_dict, load_data,
-                                   load_json, load_yaml, save_data, save_json,
+                                   load_failed_rows, load_json, load_yaml,
+                                   save_data, save_failed_rows, save_json,
                                    save_yaml, sequence_calculation,)
 from animl.generator import (ManifestGenerator,)
-from animl.pipeline import (from_config, from_paths,)
-from animl.reid import (MIEWID_SIZE, compute_batched_distance_matrix,
-                        compute_distance_matrix, cosine_distance, distance,
-                        euclidean_squared_distance, extract_miew_embeddings,
-                        inference, load_miew, remove_diagonal,)
-from animl.utils import (MD_COLORS, MD_LABELS, MEGADETECTORv5_SIZE,
-                         MODEL_TYPES, SDZWA_CLASSIFIER_SIZE, animlr,
-                         check_exiftool, check_onnx_cuda, general,
-                         get_onnx_device, get_version, plot_all_bounding_boxes,
-                         plot_box, plot_from_file, softmax, visualization,)
-from animl.video_processing import (extract_frames, get_frame_as_image,
-                                    get_images, get_videos,)
+from animl.pipeline import (MEGADETECTORv5_SIZE, SDZWA_CLASSIFIER_SIZE,
+                            from_config, from_paths,)
+from animl.reid import (MEGADESCRIPTOR_L_NORMALIZE, MEGADESCRIPTOR_L_SIZE,
+                        MIEWID_NORMALIZE, MIEWID_SIZE,
+                        compute_batched_distance_matrix,
+                        compute_distance_matrix, cosine_distance,
+                        euclidean_squared_distance, extract_reid_embeddings,
+                        load_reid, remove_diagonal,)
+from animl.utils import (MD_COLORS, MD_LABELS, animlr, check_exiftool,
+                         check_onnx_cuda, general, get_onnx_device,
+                         get_version, non_max_suppression,
+                         plot_all_bounding_boxes, plot_box, softmax,
+                         visualization,)
+from animl.video_processing import (extract_frames, get_frame_as_image, get_images,
+                                    get_videos,)
 
-__all__ = ['IMAGE_EXTENSIONS', 'MD_COLORS', 'MD_LABELS', 'MEGADETECTORv5_SIZE',
-           'MIEWID_SIZE', 'MODEL_TYPES', 'ManifestGenerator',
-           'SDZWA_CLASSIFIER_SIZE', 'VALID_EXTENSIONS', 'VIDEO_EXTENSIONS',
-           'WorkingDirectory', 'active_times', 'animlr', 'build_file_manifest',
-           'check_exiftool', 'check_file', 'check_onnx_cuda',
-           'class_list_to_dict', 'classification', 'classify',
-           'compute_batched_distance_matrix', 'compute_distance_matrix',
-           'cosine_distance', 'detect', 'detection', 'distance',
+__all__ = ['IMAGE_EXTENSIONS', 'MD_COLORS', 'MD_LABELS',
+           'MEGADESCRIPTOR_L_NORMALIZE', 'MEGADESCRIPTOR_L_SIZE',
+           'MEGADETECTORv5_SIZE', 'MIEWID_NORMALIZE', 'MIEWID_SIZE',
+           'ManifestGenerator', 'SDZWA_CLASSIFIER_SIZE', 'VALID_EXTENSIONS',
+           'VIDEO_EXTENSIONS', 'WorkingDirectory', 'active_times', 'animlr',
+           'build_file_manifest', 'check_exiftool', 'check_file',
+           'check_onnx_cuda', 'class_list_to_dict', 'classification',
+           'classify', 'compute_batched_distance_matrix',
+           'compute_distance_matrix', 'cosine_distance', 'detect', 'detection',
            'euclidean_squared_distance', 'export', 'export_camptrapdp',
            'export_camtrapR', 'export_coco', 'export_folders',
            'export_megadetector', 'export_timelapse', 'export_yolo',
-           'extract_frames', 'extract_miew_embeddings', 'file_management',
+           'extract_frames', 'extract_reid_embeddings', 'file_management',
            'from_config', 'from_paths', 'general', 'generator', 'get_animals',
-           'get_empty', 'get_frame_as_image', 'get_images', 'get_onnx_device',
-           'get_version', 'get_videos', 'inference', 'load_class_list',
-           'load_classifier', 'load_data', 'load_detector', 'load_json',
-           'load_miew', 'load_yaml', 'parse_detections',
-           'pipeline', 'plot_all_bounding_boxes', 'plot_box', 'plot_from_file',
-           'reid', 'remove_diagonal', 'remove_link', 'save_data', 'save_json',
-           'save_yaml', 'sequence_calculation', 'sequence_classification',
-           'single_classification', 'softmax', 'update_labels_from_folders',
-           'utils', 'video_processing', 'visualization']
+           'get_empty', 'get_frame_as_image',
+           'get_images', 'get_onnx_device', 'get_version', 'get_videos',
+           'load_class_list', 'load_classifier', 'load_data', 'load_failed_rows', 'load_detector',
+           'load_json', 'load_reid', 'load_yaml', 'non_max_suppression',
+           'parse_detections', 'pipeline', 'plot_all_bounding_boxes',
+           'plot_box', 'reid', 'remove_diagonal', 'remove_link', 'save_data', 'save_failed_rows',
+           'save_json', 'save_yaml', 'sequence_calculation',
+           'sequence_classification', 'single_classification', 'softmax',
+           'update_labels_from_folders', 'utils', 'video_processing',
+           'visualization']
